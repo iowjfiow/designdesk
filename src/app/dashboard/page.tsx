@@ -10,7 +10,7 @@ export default async function DashboardOverview() {
   const me = await requireUser();
   const [projects, wallet, unread] = await Promise.all([
     prisma.project.findMany({
-      where: { OR: [{ designerId: me.id }, { managerId: me.id }, { clientId: me.id }] },
+      where: { OR: [{ designerId: me.id }, { managerId: me.id }] },
       orderBy: { updatedAt: "desc" },
       take: 6,
       include: { order: true },

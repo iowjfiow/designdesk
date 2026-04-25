@@ -6,8 +6,10 @@ import { logActivity } from "@/lib/activity";
 import { bpsOf } from "@/lib/money";
 
 /**
- * Lock the order: pricing/scope are frozen and standard milestones are
- * created (Concept / Revision / Final = 30/30/40). Mode is recorded.
+ * Mutual scope approval. Each side (Designer / Client Manager) calls this once
+ * to record their approval. When all required approvals are in (designer always;
+ * manager too in COLLAB), we lock the order and generate the standard milestone
+ * schedule (Concept / Revisions / Final = 30/30/40).
  */
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -18,11 +20,52 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       include: { order: true, milestones: true },
     });
     if (!project) return fail(404, "Project not found");
-    if (![project.designerId, project.managerId].includes(me.id) && me.role !== "ADMIN") {
-      return fail(403, "Only Designer or Manager can lock");
-    }
     if (!project.order) return fail(400, "Project has no order");
     if (project.order.locked) return fail(409, "Order is already locked");
+
+    const isDesigner = me.id === project.designerId;
+    const isManager = !!project.managerId && me.id === project.managerId;
+    const isAdmin = me.role === "ADMIN";
+    if (!isDesigner && !isManager && !isAdmin) {
+      return fail(403, "Only Designer or Client Manager can approve");
+    }
+
+    const now = new Date();
+    const updates: { designerApprovedAt?: Date; managerApprovedAt?: Date } = {};
+    if (isDesigner && !project.designerApprovedAt) updates.designerApprovedAt = now;
+    if (isManager && !project.managerApprovedAt) updates.managerApprovedAt = now;
+    if (isAdmin) {
+      if (!project.designerApprovedAt) updates.designerApprovedAt = now;
+      if (project.managerId && !project.managerApprovedAt) updates.managerApprovedAt = now;
+    }
+
+    const designerApprovedAt = updates.designerApprovedAt ?? project.designerApprovedAt;
+    const managerApprovedAt = updates.managerApprovedAt ?? project.managerApprovedAt;
+    const requiresManager = project.mode === "COLLAB" && !!project.managerId;
+    const fullyApproved = !!designerApprovedAt && (!requiresManager || !!managerApprovedAt);
+
+    if (!fullyApproved) {
+      // Just record the approval; status -> AWAITING_APPROVAL if not already.
+      const newStatus = project.status === "DRAFT" ? "AWAITING_APPROVAL" : project.status;
+      await prisma.project.update({
+        where: { id: project.id },
+        data: { ...updates, status: newStatus },
+      });
+      await prisma.approval.create({
+        data: {
+          projectId: project.id,
+          kind: isManager ? "SCOPE_MANAGER" : "SCOPE_DESIGNER",
+          designerId: isDesigner || isAdmin ? me.id : null,
+          managerId: isManager ? me.id : null,
+        },
+      });
+      await logActivity({
+        actorId: me.id,
+        projectId: project.id,
+        action: isManager ? "scope.approved.manager" : "scope.approved.designer",
+      });
+      return ok({ ok: true, fullyApproved: false, designerApprovedAt, managerApprovedAt });
+    }
 
     const total = project.order.totalMinor;
     const m1 = bpsOf(total, 3000); // 30% concept
@@ -32,11 +75,22 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     await prisma.$transaction(async (tx) => {
       await tx.order.update({
         where: { id: project.order!.id },
-        data: { locked: true, lockedAt: new Date() },
+        data: { locked: true, lockedAt: now },
       });
       await tx.project.update({
         where: { id: project.id },
-        data: { status: "AWAITING_PAYMENT" },
+        data: {
+          ...updates,
+          status: "AWAITING_PAYMENT",
+        },
+      });
+      await tx.approval.create({
+        data: {
+          projectId: project.id,
+          kind: isManager ? "SCOPE_MANAGER" : "SCOPE_DESIGNER",
+          designerId: isDesigner || isAdmin ? me.id : null,
+          managerId: isManager ? me.id : null,
+        },
       });
       if (project.milestones.length === 0) {
         await tx.milestone.createMany({
@@ -80,7 +134,7 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       metadata: { totalMinor: total, currency: project.order.currency },
     });
 
-    return ok({ ok: true });
+    return ok({ ok: true, fullyApproved: true });
   } catch (e) {
     return handleError(e);
   }

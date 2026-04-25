@@ -7,6 +7,8 @@ import { ok, handleError, fail } from "@/lib/http";
 import { logActivity } from "@/lib/activity";
 import { projectCode } from "@/lib/code";
 import { notifyMany } from "@/lib/notify";
+import { issueAccessToken, buildMagicLinkPath } from "@/lib/client-token";
+import { sendEmail } from "@/lib/email";
 import { randomBytes } from "node:crypto";
 
 export async function GET() {
@@ -14,12 +16,12 @@ export async function GET() {
     const me = await requireUser();
     const projects = await prisma.project.findMany({
       where: {
-        OR: [{ designerId: me.id }, { managerId: me.id }, { clientId: me.id }],
+        OR: [{ designerId: me.id }, { managerId: me.id }],
       },
       include: {
         designer: { select: { id: true, name: true, email: true } },
         manager: { select: { id: true, name: true, email: true } },
-        client: { select: { id: true, name: true, email: true } },
+        clientContact: { select: { id: true, name: true, email: true } },
         order: true,
         _count: { select: { messages: true, milestones: true } },
       },
@@ -35,8 +37,6 @@ export async function POST(req: NextRequest) {
   try {
     const me = await requireUser();
 
-    // Only Designers (or Admins) can create projects directly. Client Managers
-    // can create COLLAB projects on behalf of a designer/client.
     if (!["DESIGNER", "ADMIN", "CLIENT_MANAGER"].includes(me.role)) {
       return fail(403, "Only designers, managers, or admins can create projects");
     }
@@ -49,32 +49,25 @@ export async function POST(req: NextRequest) {
       return fail(400, "Solo mode cannot have a manager");
     }
 
-    // Resolve / invite client
-    const client = await upsertParty(body.clientEmail, body.clientName, "CLIENT");
+    // Resolve / create the magic-link client (no User row, no password).
+    const clientContact = await upsertClientContact(body.clientEmail, body.clientName);
 
-    // Designer is `me` if I'm a designer, else the project must specify one
-    // (in this MVP we keep it simple: designer == current user when designer/admin,
-    // and if a CLIENT_MANAGER creates the project they must invite a designer
-    // — we error here to keep the flow correct).
     let designerId: string;
     let managerId: string | null = null;
     if (me.role === "DESIGNER" || me.role === "ADMIN") {
       designerId = me.id;
       if (body.mode === "COLLAB" && body.managerEmail) {
-        const mgr = await upsertParty(body.managerEmail, undefined, "CLIENT_MANAGER");
+        const mgr = await upsertCollaborator(body.managerEmail, undefined, "CLIENT_MANAGER");
         managerId = mgr.id;
       }
     } else {
-      // CLIENT_MANAGER: must designate a designer via managerEmail field reused?
-      // For clarity we require the managerEmail to be the designer they collab with.
-      // (Better: separate field — we'll treat managerEmail as the designer email here.)
+      // CLIENT_MANAGER creating a project: managerEmail field carries the designer's email.
       if (!body.managerEmail) return fail(400, "Specify the designer's email in managerEmail");
-      const designer = await upsertParty(body.managerEmail, undefined, "DESIGNER");
+      const designer = await upsertCollaborator(body.managerEmail, undefined, "DESIGNER");
       designerId = designer.id;
       managerId = me.id;
     }
 
-    // Pricing
     const pkg = await prisma.package.findUnique({ where: { id: body.packageId } });
     if (!pkg) return fail(400, "Unknown package");
     const addons = body.addonIds.length
@@ -112,7 +105,7 @@ export async function POST(req: NextRequest) {
         status: "DRAFT",
         designerId,
         managerId,
-        clientId: client.id,
+        clientContactId: clientContact.id,
         designerBps,
         managerBps,
         platformFeeBps,
@@ -144,30 +137,61 @@ export async function POST(req: NextRequest) {
       include: { order: { include: { addons: true } } },
     });
 
+    // Issue a magic-link access token for the client and email it.
+    const { token } = await issueAccessToken({
+      projectId: project.id,
+      role: "CLIENT",
+      label: "client",
+    });
+    const base = process.env.APP_BASE_URL ?? "http://localhost:3000";
+    const magicLink = `${base}${buildMagicLinkPath(token)}`;
+    await sendEmail({
+      to: clientContact.email,
+      subject: `Your project ${project.code} — ${project.title}`,
+      bodyText: `Hi${clientContact.name ? " " + clientContact.name : ""},\n\nA new project has been started for you on DesignDesk.\nOpen it here (no signup needed): ${magicLink}\n\nThis link is private to you — do not share it.`,
+    });
+
     await logActivity({
       actorId: me.id,
       projectId: project.id,
       action: "project.created",
-      metadata: { mode: project.mode, total: totalMinor, currency: pkg.currency },
+      metadata: {
+        mode: project.mode,
+        total: totalMinor,
+        currency: pkg.currency,
+        clientEmail: clientContact.email,
+      },
     });
-    await notifyMany([client.id, designerId, ...(managerId ? [managerId] : [])].filter((x) => x !== me.id), {
+    await notifyMany([designerId, ...(managerId ? [managerId] : [])].filter((x) => x !== me.id), {
       title: `New project: ${project.title}`,
       body: `You've been added to project ${project.code}.`,
       href: `/dashboard/projects/${project.id}`,
     });
 
-    return ok({ project });
+    return ok({ project, magicLink });
   } catch (e) {
     return handleError(e);
   }
 }
 
-async function upsertParty(email: string, name: string | undefined, role: "CLIENT" | "DESIGNER" | "CLIENT_MANAGER") {
+async function upsertClientContact(email: string, name?: string) {
+  const lower = email.toLowerCase();
+  return prisma.clientContact.upsert({
+    where: { email: lower },
+    update: name ? { name } : {},
+    create: { email: lower, name: name ?? null },
+  });
+}
+
+async function upsertCollaborator(
+  email: string,
+  name: string | undefined,
+  role: "DESIGNER" | "CLIENT_MANAGER",
+) {
   const lower = email.toLowerCase();
   const existing = await prisma.user.findUnique({ where: { email: lower } });
   if (existing) return existing;
-  // Invite-style: create a placeholder account with a random password.
-  // The user will need to do "forgot password" to set one — that flow is a TODO.
+  // Invite-style placeholder account; the user will set a password via signup.
   const tempPw = randomBytes(24).toString("hex");
   return prisma.user.create({
     data: {

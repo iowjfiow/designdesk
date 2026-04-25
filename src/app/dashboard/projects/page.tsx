@@ -8,9 +8,9 @@ import { formatMoney } from "@/lib/money";
 export default async function ProjectsPage() {
   const me = await requireUser();
   const projects = await prisma.project.findMany({
-    where: { OR: [{ designerId: me.id }, { managerId: me.id }, { clientId: me.id }] },
+    where: { OR: [{ designerId: me.id }, { managerId: me.id }] },
     orderBy: { updatedAt: "desc" },
-    include: { order: true, designer: true, client: true, manager: true },
+    include: { order: true, designer: true, clientContact: true, manager: true },
   });
 
   return (
@@ -36,7 +36,7 @@ export default async function ProjectsPage() {
                   <Badge>{p.status.replace("_", " ")}</Badge>
                 </div>
                 <div className="text-xs text-muted-foreground">
-                  {p.code} · client {p.client.email} · designer {p.designer.email}
+                  {p.code} · client {p.clientContact.email} · designer {p.designer.email}
                   {p.manager ? ` · manager ${p.manager.email}` : ""}
                 </div>
               </div>

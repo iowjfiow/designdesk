@@ -1,6 +1,7 @@
 export const dynamic = "force-dynamic";
 import { prisma } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { resolveAccessToken, readClientCookie } from "@/lib/client-token";
 import { ok, fail, handleError } from "@/lib/http";
 import { RejectMilestoneSchema } from "@/lib/validators";
 import { logActivity } from "@/lib/activity";
@@ -12,15 +13,22 @@ import { notify } from "@/lib/notify";
  */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string; milestoneId: string }> }) {
   try {
-    const me = await requireUser();
     const { id, milestoneId } = await params;
+    const me = await getCurrentUser();
+    const url = new URL(req.url);
+    const tokenFromQuery = url.searchParams.get("t");
+    const tokenFromCookie = await readClientCookie(id);
+    const tokenCtx = await resolveAccessToken(tokenFromQuery ?? tokenFromCookie ?? "");
+
     const body = RejectMilestoneSchema.parse(await req.json());
     const project = await prisma.project.findUnique({
       where: { id },
       include: { milestones: true, order: { include: { package: true } } },
     });
     if (!project) return fail(404, "Project not found");
-    if (project.clientId !== me.id && me.role !== "ADMIN") {
+    const isClient = !!tokenCtx && tokenCtx.projectId === project.id && tokenCtx.role === "CLIENT";
+    const isAdmin = !!me && me.role === "ADMIN";
+    if (!isClient && !isAdmin) {
       return fail(403, "Only the client can request a revision");
     }
     const milestone = project.milestones.find((m) => m.id === milestoneId);
@@ -44,10 +52,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
     });
     await prisma.project.update({ where: { id }, data: { status: "REVISION_REQUESTED" } });
     await logActivity({
-      actorId: me.id,
+      actorId: me?.id ?? null,
       projectId: id,
       action: "milestone.rejected",
-      metadata: { milestoneId, reason: body.reason, used: used + 1, allowed },
+      metadata: { milestoneId, reason: body.reason, used: used + 1, allowed, viewer: isClient ? "client" : "admin" },
     });
     await notify(project.designerId, {
       title: `Revision requested on ${milestone.title}`,

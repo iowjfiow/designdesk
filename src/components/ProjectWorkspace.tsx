@@ -1,11 +1,20 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardSubtitle, CardTitle } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Input";
 import { formatMoney } from "@/lib/money";
+
+type Message = {
+  id: string;
+  body: string;
+  createdAt: string;
+  senderName: string;
+  senderUser: { id: string; name: string | null; role: string } | null;
+  senderClient: { id: string; name: string | null; email: string } | null;
+};
 
 type ProjectDetail = {
   id: string;
@@ -15,12 +24,14 @@ type ProjectDetail = {
   status: string;
   designerId: string;
   managerId: string | null;
-  clientId: string;
+  clientContactId: string;
   designerBps: number;
   managerBps: number;
+  designerApprovedAt: string | null;
+  managerApprovedAt: string | null;
   designer: { id: string; name: string | null; email: string; stripeAccountId: string | null; payoutsEnabled: boolean };
   manager: { id: string; name: string | null; email: string; stripeAccountId: string | null; payoutsEnabled: boolean } | null;
-  client: { id: string; name: string | null; email: string };
+  clientContact: { id: string; name: string | null; email: string };
   order: {
     id: string;
     locked: boolean;
@@ -45,8 +56,9 @@ type ProjectDetail = {
     order: number;
     deliverables: { id: string; filename: string; version: number; sizeBytes: number; createdAt: string }[];
   }[];
-  messages: { id: string; body: string; createdAt: string; senderId: string; sender: { id: string; name: string | null; role: string } }[];
+  messages: Message[];
   disputes: { id: string; reason: string; status: string }[];
+  accessTokens?: { id: string; label: string | null; createdAt: string }[];
   activityLogs: { id: string; action: string; createdAt: string; actor: { id: string; name: string | null; role: string } | null; metadata: unknown }[];
 };
 
@@ -54,16 +66,23 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
   const router = useRouter();
   const isDesigner = project.designerId === meId;
   const isManager = project.managerId === meId;
-  const isClient = project.clientId === meId;
   const order = project.order;
-  const payment = order?.payments.find((p) => p.status === "CAPTURED" || p.status === "PARTIALLY_RELEASED" || p.status === "REQUIRES_PAYMENT" || p.status === "PROCESSING");
+  const payment = order?.payments.find(
+    (p) =>
+      p.status === "CAPTURED" ||
+      p.status === "PARTIALLY_RELEASED" ||
+      p.status === "REQUIRES_PAYMENT" ||
+      p.status === "PROCESSING",
+  );
 
   const refresh = () => router.refresh();
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [magicLink, setMagicLink] = useState<string | null>(null);
 
   async function call(action: string, url: string, init?: RequestInit) {
-    setBusy(action); setErr(null);
+    setBusy(action);
+    setErr(null);
     try {
       const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, ...init });
       const j = await res.json().catch(() => ({}));
@@ -77,6 +96,29 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
     }
   }
 
+  async function reissueMagicLink() {
+    setBusy("magic");
+    setErr(null);
+    try {
+      const res = await fetch(`/api/projects/${project.id}/access`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error ?? "Failed to issue link");
+      setMagicLink(j.magicLink);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const requiresManager = project.mode === "COLLAB" && !!project.managerId;
+  const designerApproved = !!project.designerApprovedAt;
+  const managerApproved = !!project.managerApprovedAt;
+  const fullyApproved = designerApproved && (!requiresManager || managerApproved);
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -85,7 +127,7 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
           <p className="text-sm text-muted-foreground">
             {project.code} ·{" "}
             <Badge variant={project.mode === "SOLO" ? "muted" : "accent"}>{project.mode}</Badge>{" "}
-            <Badge>{project.status.replace("_", " ")}</Badge>
+            <Badge>{project.status.replace(/_/g, " ")}</Badge>
           </p>
         </div>
         {project.status === "DISPUTED" ? (
@@ -93,34 +135,71 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
         ) : null}
       </div>
 
-      {err ? <Card className="border-danger text-danger"><CardSubtitle>{err}</CardSubtitle></Card> : null}
+      {err ? (
+        <Card className="border-danger text-danger">
+          <CardSubtitle>{err}</CardSubtitle>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
           <Card>
             <CardTitle>Workflow</CardTitle>
-            <CardSubtitle>Each step is recorded; pricing/scope are frozen at lock.</CardSubtitle>
+            <CardSubtitle>Pricing freezes only after both parties approve.</CardSubtitle>
             <ol className="mt-4 space-y-3 text-sm">
               <Step
-                done={order?.locked ?? false}
-                active={!!order && !order.locked}
+                done={designerApproved}
+                active={!designerApproved && !order?.locked}
+                label={`Designer approval${requiresManager ? "" : " (sole approver in SOLO)"}`}
+                action={
+                  isDesigner && !designerApproved && !order?.locked ? (
+                    <Button size="sm" loading={busy === "lock"} onClick={() => call("lock", `/api/projects/${project.id}/lock`)}>
+                      Approve scope
+                    </Button>
+                  ) : designerApproved ? (
+                    <Badge variant="success">Approved</Badge>
+                  ) : null
+                }
+              />
+              {requiresManager ? (
+                <Step
+                  done={managerApproved}
+                  active={!managerApproved && !order?.locked}
+                  label="Client Manager approval"
+                  action={
+                    isManager && !managerApproved && !order?.locked ? (
+                      <Button size="sm" loading={busy === "lock"} onClick={() => call("lock", `/api/projects/${project.id}/lock`)}>
+                        Approve scope
+                      </Button>
+                    ) : managerApproved ? (
+                      <Badge variant="success">Approved</Badge>
+                    ) : null
+                  }
+                />
+              ) : null}
+              <Step
+                done={fullyApproved && (order?.locked ?? false)}
+                active={fullyApproved && !order?.locked}
                 label="Order locked"
                 action={
-                  (isDesigner || isManager) && order && !order.locked ? (
-                    <Button size="sm" loading={busy === "lock"} onClick={() => call("lock", `/api/projects/${project.id}/lock`)}>
-                      Lock order
-                    </Button>
+                  fullyApproved && !order?.locked ? (
+                    <Badge variant="warning">Auto-locks on full approval</Badge>
                   ) : null
                 }
               />
               <Step
                 done={!!payment && payment.status !== "REQUIRES_PAYMENT" && payment.status !== "PROCESSING"}
-                active={!!order?.locked && (!payment || payment.status === "REQUIRES_PAYMENT" || payment.status === "PROCESSING")}
+                active={
+                  !!order?.locked &&
+                  (!payment || payment.status === "REQUIRES_PAYMENT" || payment.status === "PROCESSING")
+                }
                 label="Escrow funded"
                 action={
-                  isClient && order?.locked && (!payment || payment.status === "REQUIRES_PAYMENT") ? (
-                    <PayButton projectId={project.id} />
-                  ) : payment && payment.status === "PROCESSING" ? <Badge variant="warning">Processing</Badge> : null
+                  payment && payment.status === "PROCESSING" ? (
+                    <Badge variant="warning">Processing</Badge>
+                  ) : order?.locked ? (
+                    <Badge variant="muted">Client pays via magic-link</Badge>
+                  ) : null
                 }
               />
               <Step
@@ -140,7 +219,7 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
 
           <Card>
             <CardTitle>Milestones</CardTitle>
-            <CardSubtitle>Funds release as each milestone is approved.</CardSubtitle>
+            <CardSubtitle>Funds release as the client approves each milestone.</CardSubtitle>
             <div className="mt-4 space-y-3">
               {project.milestones.map((m) => (
                 <MilestoneRow
@@ -148,14 +227,13 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
                   m={m}
                   currency={order?.currency ?? "INR"}
                   isDesigner={isDesigner}
-                  isClient={isClient}
                   projectId={project.id}
                   onChanged={refresh}
                   disabled={project.status === "DISPUTED"}
                 />
               ))}
               {project.milestones.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Lock the order to generate milestones.</p>
+                <p className="text-sm text-muted-foreground">Milestones generate automatically when both parties approve the scope.</p>
               ) : null}
             </div>
           </Card>
@@ -197,23 +275,49 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
                   {order.locked ? `Locked ${new Date(order.lockedAt!).toLocaleString()}` : "Not yet locked"}
                 </div>
               </div>
-            ) : <p className="text-sm text-muted-foreground">No order.</p>}
+            ) : (
+              <p className="text-sm text-muted-foreground">No order.</p>
+            )}
           </Card>
 
           <Card>
             <CardTitle>Parties</CardTitle>
             <ul className="mt-3 space-y-2 text-sm">
-              <li><strong>Client:</strong> {project.client.name ?? project.client.email}</li>
-              <li><strong>Designer:</strong> {project.designer.name ?? project.designer.email}</li>
+              <li>
+                <strong>Client:</strong> {project.clientContact.name ?? project.clientContact.email}
+              </li>
+              <li>
+                <strong>Designer:</strong> {project.designer.name ?? project.designer.email}
+              </li>
               {project.manager ? (
-                <li><strong>Manager:</strong> {project.manager.name ?? project.manager.email}</li>
+                <li>
+                  <strong>Manager:</strong> {project.manager.name ?? project.manager.email}
+                </li>
               ) : null}
             </ul>
             {project.mode === "COLLAB" ? (
               <p className="mt-3 text-xs text-muted-foreground">
-                Split: Designer {(project.designerBps / 100).toFixed(0)}% / Manager {(project.managerBps / 100).toFixed(0)}%
+                Split: Designer {(project.designerBps / 100).toFixed(0)}% / Manager{" "}
+                {(project.managerBps / 100).toFixed(0)}%
               </p>
             ) : null}
+          </Card>
+
+          <Card>
+            <CardTitle>Client magic-link</CardTitle>
+            <CardSubtitle>Clients access this project via a private link — no signup required.</CardSubtitle>
+            <div className="mt-3 space-y-2 text-sm">
+              {magicLink ? (
+                <div className="break-all rounded-md border border-border bg-muted/30 p-2 text-xs">{magicLink}</div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  We emailed the link to <strong>{project.clientContact.email}</strong>. Re-issue if it was lost.
+                </p>
+              )}
+              <Button size="sm" variant="outline" loading={busy === "magic"} onClick={reissueMagicLink}>
+                {magicLink ? "Issue another link" : "Re-issue magic link"}
+              </Button>
+            </div>
           </Card>
 
           <Card>
@@ -236,7 +340,11 @@ function Step({ done, active, label, action }: { done: boolean; active: boolean;
   return (
     <li className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
       <div className="flex items-center gap-3">
-        <span className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${done ? "bg-success text-white" : active ? "bg-accent text-white" : "bg-muted text-muted-foreground"}`}>
+        <span
+          className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${
+            done ? "bg-success text-white" : active ? "bg-accent text-white" : "bg-muted text-muted-foreground"
+          }`}
+        >
           {done ? "✓" : active ? "●" : "○"}
         </span>
         <span className="font-medium">{label}</span>
@@ -250,7 +358,6 @@ function MilestoneRow({
   m,
   currency,
   isDesigner,
-  isClient,
   projectId,
   onChanged,
   disabled,
@@ -258,14 +365,11 @@ function MilestoneRow({
   m: ProjectDetail["milestones"][number];
   currency: string;
   isDesigner: boolean;
-  isClient: boolean;
   projectId: string;
   onChanged: () => void;
   disabled: boolean;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
-  const [reason, setReason] = useState("");
-  const [showReject, setShowReject] = useState(false);
 
   async function go(action: string, url: string, body?: object) {
     setBusy(action);
@@ -303,17 +407,13 @@ function MilestoneRow({
             <DeliverableUploader projectId={projectId} milestoneId={m.id} onUploaded={onChanged} />
           ) : null}
           {isDesigner && (m.status === "IN_PROGRESS" || m.status === "REJECTED") && m.deliverables.length > 0 && !disabled ? (
-            <Button size="sm" loading={busy === "submit"} onClick={() => go("submit", `/api/projects/${projectId}/milestones/${m.id}/submit`, {})}>
+            <Button
+              size="sm"
+              loading={busy === "submit"}
+              onClick={() => go("submit", `/api/projects/${projectId}/milestones/${m.id}/submit`, {})}
+            >
               Submit for review
             </Button>
-          ) : null}
-          {isClient && m.status === "SUBMITTED" && !disabled ? (
-            <>
-              <Button size="sm" variant="success" loading={busy === "approve"} onClick={() => go("approve", `/api/projects/${projectId}/milestones/${m.id}/approve`)}>
-                Approve & release
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setShowReject((s) => !s)}>Request revision</Button>
-            </>
           ) : null}
         </div>
       </div>
@@ -325,23 +425,6 @@ function MilestoneRow({
             </li>
           ))}
         </ul>
-      ) : null}
-      {showReject ? (
-        <div className="mt-3 space-y-2">
-          <Textarea placeholder="Why are revisions needed?" value={reason} onChange={(e) => setReason(e.target.value)} />
-          <Button
-            size="sm"
-            variant="danger"
-            loading={busy === "reject"}
-            onClick={async () => {
-              await go("reject", `/api/projects/${projectId}/milestones/${m.id}/reject`, { reason });
-              setShowReject(false);
-              setReason("");
-            }}
-          >
-            Send revision request
-          </Button>
-        </div>
       ) : null}
     </div>
   );
@@ -387,10 +470,12 @@ function DeliverableUploader({ projectId, milestoneId, onUploaded }: { projectId
   );
 }
 
-function ChatPanel({ projectId, initial }: { projectId: string; initial: ProjectDetail["messages"] }) {
+function ChatPanel({ projectId, initial }: { projectId: string; initial: Message[] }) {
   const [messages, setMessages] = useState(initial);
   const [body, setBody] = useState("");
   const [sending, setSending] = useState(false);
+  // keep the chat in sync with router refreshes
+  useEffect(() => setMessages(initial), [initial]);
 
   async function send() {
     if (!body.trim()) return;
@@ -402,7 +487,10 @@ function ChatPanel({ projectId, initial }: { projectId: string; initial: Project
         body: JSON.stringify({ body }),
       });
       const j = await res.json();
-      if (!res.ok) { alert(j.error ?? "Failed"); return; }
+      if (!res.ok) {
+        alert(j.error ?? "Failed");
+        return;
+      }
       const refreshed = await fetch(`/api/projects/${projectId}/messages`).then((r) => r.json());
       setMessages(refreshed.messages);
       setBody("");
@@ -420,7 +508,11 @@ function ChatPanel({ projectId, initial }: { projectId: string; initial: Project
         {messages.map((m) => (
           <div key={m.id} className="rounded-md bg-card p-2">
             <div className="text-xs text-muted-foreground">
-              <strong>{m.sender.name ?? m.sender.role}</strong> · {new Date(m.createdAt).toLocaleString()}
+              <strong>
+                {m.senderName}
+                {m.senderClient ? " (client)" : m.senderUser ? "" : ""}
+              </strong>{" "}
+              · {new Date(m.createdAt).toLocaleString()}
             </div>
             <div>{m.body}</div>
           </div>
@@ -428,7 +520,9 @@ function ChatPanel({ projectId, initial }: { projectId: string; initial: Project
       </div>
       <div className="mt-3 flex items-end gap-2">
         <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a message…" />
-        <Button onClick={send} loading={sending}>Send</Button>
+        <Button onClick={send} loading={sending}>
+          Send
+        </Button>
       </div>
     </Card>
   );
@@ -453,40 +547,15 @@ function DisputeForm({ projectId }: { projectId: string }) {
             body: JSON.stringify({ reason }),
           });
           setBusy(false);
-          if (!r.ok) { const j = await r.json().catch(() => ({})); alert(j.error ?? "Failed"); }
-          else router.refresh();
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}));
+            alert(j.error ?? "Failed");
+          } else router.refresh();
         }}
       >
         Raise dispute
       </Button>
     </div>
-  );
-}
-
-function PayButton({ projectId }: { projectId: string }) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <Button
-      size="sm"
-      variant="accent"
-      loading={busy}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          const r = await fetch(`/api/projects/${projectId}/pay`, { method: "POST" });
-          const j = await r.json();
-          if (!r.ok) { alert(j.error ?? "Failed"); return; }
-          if (j.publishableKey && j.clientSecret) {
-            // Redirect to a hosted checkout page that confirms with Stripe.js
-            window.location.href = `/checkout?cs=${encodeURIComponent(j.clientSecret)}&pk=${encodeURIComponent(j.publishableKey)}&pid=${encodeURIComponent(projectId)}`;
-          } else {
-            alert("Payment provider not configured. Set STRIPE_SECRET_KEY and reload.");
-          }
-        } finally { setBusy(false); }
-      }}
-    >
-      Pay & fund escrow
-    </Button>
   );
 }
 
@@ -498,4 +567,7 @@ function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode 
     </div>
   );
 }
-function Divider() { return <div className="my-1 h-px w-full bg-border" />; }
+
+function Divider() {
+  return <hr className="my-2 border-border" />;
+}
