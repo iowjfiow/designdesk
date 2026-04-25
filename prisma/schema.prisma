@@ -1,0 +1,469 @@
+// DesignDesk — Freelance Collaboration Platform
+// Schema covers: dual-mode projects, structured pricing, escrow ledger,
+// milestone-based releases, revenue split, in-app chat, disputes, audit log.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────── Users / Auth ─────────────────────────────────
+
+enum Role {
+  ADMIN
+  DESIGNER
+  CLIENT_MANAGER
+  CLIENT
+}
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  name            String?
+  passwordHash    String
+  role            Role     @default(CLIENT)
+  emailVerifiedAt DateTime?
+  mfaEnabled      Boolean  @default(false)
+  mfaSecret       String?
+  // Stripe Connect / Razorpay Linked Account ids
+  stripeAccountId String?  @unique
+  razorpayAccountId String? @unique
+  payoutsEnabled  Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  ownedProjects     Project[] @relation("DesignerProjects")
+  managedProjects   Project[] @relation("ManagerProjects")
+  clientProjects    Project[] @relation("ClientProjects")
+  sentMessages      Message[]
+  activityLogs      ActivityLog[]
+  walletEntries     WalletEntry[]
+  notifications     Notification[]
+  sessions          Session[]
+  raisedDisputes    Dispute[] @relation("DisputeRaiser")
+  approvalsAsClient Approval[] @relation("ClientApprovals")
+  approvalsAsDesigner Approval[] @relation("DesignerApprovals")
+  approvalsAsManager Approval[] @relation("ManagerApprovals")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String   @unique
+  userAgent String?
+  ip        String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────── Catalog ──────────────────────────────────────
+
+model Package {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String
+  // Price stored in lowest currency unit (paise / cents)
+  priceMinor  Int
+  currency    String   @default("INR")
+  concepts    Int
+  revisions   Int
+  deliveryDays Int
+  includedFiles String[]
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders      Order[]
+}
+
+model Addon {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  description String
+  priceMinor  Int
+  currency    String   @default("INR")
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orderAddons OrderAddon[]
+}
+
+// ─────────────────────────── Projects / Orders ────────────────────────────
+
+enum ProjectMode {
+  COLLAB
+  SOLO
+}
+
+enum ProjectStatus {
+  DRAFT          // order being built
+  AWAITING_PAYMENT
+  PAID           // funds escrowed
+  IN_PROGRESS
+  IN_REVIEW
+  REVISION_REQUESTED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  code        String   @unique // human-readable e.g. DD-A1B2
+  title       String
+  briefMd     String?
+
+  mode        ProjectMode
+  status      ProjectStatus @default(DRAFT)
+
+  // Parties
+  designerId  String
+  designer    User     @relation("DesignerProjects", fields: [designerId], references: [id])
+  managerId   String?
+  manager     User?    @relation("ManagerProjects", fields: [managerId], references: [id])
+  clientId    String
+  client      User     @relation("ClientProjects", fields: [clientId], references: [id])
+
+  // Split (in collab). Designer + Manager bps must sum to <= 10000 (rest = platform fee).
+  designerBps Int      @default(6000)
+  managerBps  Int      @default(4000)
+  platformFeeBps Int   @default(0)
+
+  order       Order?
+  milestones  Milestone[]
+  messages    Message[]
+  deliverables Deliverable[]
+  disputes    Dispute[]
+  walletEntries WalletEntry[]
+  activityLogs ActivityLog[]
+  approvals   Approval[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([designerId])
+  @@index([managerId])
+  @@index([clientId])
+  @@index([status])
+}
+
+model Order {
+  id          String   @id @default(cuid())
+  projectId   String   @unique
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  packageId   String
+  package     Package  @relation(fields: [packageId], references: [id])
+
+  // Locked snapshot at confirmation time. Once locked, scope cannot change.
+  locked      Boolean  @default(false)
+  lockedAt    DateTime?
+
+  packageNameSnapshot   String
+  packagePriceMinor     Int
+  currency              String   @default("INR")
+  taxBps                Int      @default(0)
+  subtotalMinor         Int
+  taxMinor              Int
+  totalMinor            Int
+
+  // Custom-quote support (for non-catalog work)
+  customQuote           Boolean  @default(false)
+  customNotes           String?
+
+  addons       OrderAddon[]
+  payments     Payment[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model OrderAddon {
+  id          String   @id @default(cuid())
+  orderId     String
+  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  addonId     String
+  addon       Addon    @relation(fields: [addonId], references: [id])
+  // Snapshot fields
+  nameSnapshot String
+  priceMinor   Int
+
+  @@unique([orderId, addonId])
+}
+
+// ─────────────────────────── Milestones / Approvals ───────────────────────
+
+enum MilestoneKind {
+  CONCEPT
+  REVISION
+  FINAL
+  CUSTOM
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_PROGRESS
+  SUBMITTED       // deliverable uploaded, awaiting client approval
+  APPROVED        // funds released
+  REJECTED        // revision requested
+  DISPUTED
+}
+
+model Milestone {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  kind        MilestoneKind
+  title       String
+  description String?
+  // Portion of escrow released on approval (in basis points of total).
+  releaseBps  Int
+  amountMinor Int
+  currency    String   @default("INR")
+  order       Int
+  status      MilestoneStatus @default(PENDING)
+  submittedAt DateTime?
+  approvedAt  DateTime?
+  rejectedAt  DateTime?
+
+  deliverables Deliverable[]
+  approvals    Approval[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId, order])
+}
+
+enum ApprovalKind {
+  CLIENT_APPROVE
+  DESIGNER_ACCEPT
+  MANAGER_SUBMIT
+  CLIENT_VERIFY
+}
+
+model Approval {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  milestoneId String?
+  milestone   Milestone? @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  kind        ApprovalKind
+
+  clientId    String?
+  client      User?    @relation("ClientApprovals", fields: [clientId], references: [id])
+  designerId  String?
+  designer    User?    @relation("DesignerApprovals", fields: [designerId], references: [id])
+  managerId   String?
+  manager     User?    @relation("ManagerApprovals", fields: [managerId], references: [id])
+
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([projectId])
+}
+
+// ─────────────────────────── Deliverables ─────────────────────────────────
+
+model Deliverable {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  milestoneId String?
+  milestone   Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
+
+  version     Int      @default(1)
+  filename    String
+  storagePath String
+  mimetype    String
+  sizeBytes   Int
+  sha256      String
+  scannedClean Boolean @default(false)
+  uploadedById String
+  notes       String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([projectId, version])
+}
+
+// ─────────────────────────── Payments / Escrow / Wallet ────────────────────
+
+enum PaymentProvider {
+  STRIPE
+  RAZORPAY
+  MANUAL
+}
+
+enum PaymentStatus {
+  REQUIRES_PAYMENT
+  PROCESSING
+  CAPTURED        // funds in platform escrow
+  PARTIALLY_RELEASED
+  RELEASED        // all funds disbursed
+  REFUNDED
+  FAILED
+  CANCELLED
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  provider        PaymentProvider
+  providerIntentId String? @unique // pi_... or rzp_...
+  providerChargeId String?
+  clientSecret    String?
+
+  amountMinor     Int
+  currency        String   @default("INR")
+  status          PaymentStatus @default(REQUIRES_PAYMENT)
+  capturedAt      DateTime?
+  releasedAt      DateTime?
+
+  // Escrow accounting
+  releasedMinor   Int      @default(0)
+  refundedMinor   Int      @default(0)
+
+  rawWebhook      Json?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  walletEntries   WalletEntry[]
+  transfers       Transfer[]
+}
+
+model Transfer {
+  id              String   @id @default(cuid())
+  paymentId       String
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  recipientUserId String
+  amountMinor     Int
+  currency        String   @default("INR")
+  providerTransferId String? @unique
+  status          String   @default("pending") // pending|completed|failed
+  failureReason   String?
+
+  createdAt       DateTime @default(now())
+}
+
+enum WalletEntryKind {
+  ESCROW_HOLD       // client paid into platform
+  ESCROW_RELEASE    // designer / manager earned share
+  PLATFORM_FEE
+  REFUND
+  PAYOUT            // wired out to connected account
+  ADJUSTMENT
+}
+
+model WalletEntry {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  paymentId   String?
+  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  kind        WalletEntryKind
+  // Signed amount: positive = credit to user, negative = debit
+  amountMinor Int
+  currency    String   @default("INR")
+  // pending|available|locked
+  state       String   @default("available")
+  description String?
+
+  createdAt   DateTime @default(now())
+
+  @@index([userId, state])
+}
+
+// ─────────────────────────── Chat / Messaging ─────────────────────────────
+
+model Message {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  senderId    String
+  sender      User     @relation(fields: [senderId], references: [id])
+  body        String
+  // Hash chains messages → tamper-evident audit
+  prevHash    String?
+  hash        String   @unique
+  attachments Json?    // array of {filename, storagePath, mimetype, sizeBytes}
+  createdAt   DateTime @default(now())
+
+  @@index([projectId, createdAt])
+}
+
+// ─────────────────────────── Disputes ─────────────────────────────────────
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_RELEASE
+  RESOLVED_REFUND
+  RESOLVED_PARTIAL
+}
+
+model Dispute {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  raisedById  String
+  raisedBy    User     @relation("DisputeRaiser", fields: [raisedById], references: [id])
+  reason      String
+  status      DisputeStatus @default(OPEN)
+  resolutionNotes String?
+  refundedMinor Int   @default(0)
+  releasedMinor Int   @default(0)
+
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+}
+
+// ─────────────────────────── Activity / Audit ─────────────────────────────
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  projectId   String?
+  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  action      String
+  metadata    Json?
+  ip          String?
+  userAgent   String?
+  createdAt   DateTime @default(now())
+
+  @@index([projectId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+// ─────────────────────────── Notifications ────────────────────────────────
+
+model Notification {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title       String
+  body        String
+  href        String?
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, readAt])
+}
