@@ -17,38 +17,74 @@ enum Role {
   ADMIN
   DESIGNER
   CLIENT_MANAGER
-  CLIENT
 }
 
 model User {
-  id              String   @id @default(cuid())
-  email           String   @unique
-  name            String?
-  passwordHash    String
-  role            Role     @default(CLIENT)
-  emailVerifiedAt DateTime?
-  mfaEnabled      Boolean  @default(false)
-  mfaSecret       String?
+  id                String    @id @default(cuid())
+  email             String    @unique
+  name              String?
+  passwordHash      String
+  role              Role      @default(DESIGNER)
+  emailVerifiedAt   DateTime?
+  mfaEnabled        Boolean   @default(false)
+  mfaSecret         String?
   // Stripe Connect / Razorpay Linked Account ids
-  stripeAccountId String?  @unique
-  razorpayAccountId String? @unique
-  payoutsEnabled  Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  stripeAccountId   String?   @unique
+  razorpayAccountId String?   @unique
+  payoutsEnabled    Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   // Relations
-  ownedProjects     Project[] @relation("DesignerProjects")
-  managedProjects   Project[] @relation("ManagerProjects")
-  clientProjects    Project[] @relation("ClientProjects")
-  sentMessages      Message[]
-  activityLogs      ActivityLog[]
-  walletEntries     WalletEntry[]
-  notifications     Notification[]
-  sessions          Session[]
-  raisedDisputes    Dispute[] @relation("DisputeRaiser")
-  approvalsAsClient Approval[] @relation("ClientApprovals")
-  approvalsAsDesigner Approval[] @relation("DesignerApprovals")
-  approvalsAsManager Approval[] @relation("ManagerApprovals")
+  ownedProjects       Project[]      @relation("DesignerProjects")
+  managedProjects     Project[]      @relation("ManagerProjects")
+  sentMessages        Message[]
+  activityLogs        ActivityLog[]
+  walletEntries       WalletEntry[]
+  notifications       Notification[]
+  sessions            Session[]
+  raisedDisputes      Dispute[]      @relation("DisputeRaiser")
+  approvalsAsDesigner Approval[]     @relation("DesignerApprovals")
+  approvalsAsManager  Approval[]     @relation("ManagerApprovals")
+}
+
+// Magic-link clients — no password, no login. Email + name only. They
+// access projects via signed tokens (see ProjectAccessToken).
+model ClientContact {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  projects  Project[]  @relation("ClientContactProjects")
+  approvals Approval[] @relation("ClientApprovals")
+  messages  Message[]
+}
+
+// Signed access tokens granting a magic-link client (or anyone holding it)
+// read+act access to a single project. The raw token is never stored —
+// only its SHA-256 hash. The token surfaces in URLs as /p/<token>.
+model ProjectAccessToken {
+  id         String          @id @default(cuid())
+  projectId  String
+  project    Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // SHA-256 hex of the raw token
+  tokenHash  String          @unique
+  label      String? // e.g. "client", "share-readonly"
+  // Subject role used when this token authenticates a request.
+  role       AccessTokenRole @default(CLIENT)
+  createdAt  DateTime        @default(now())
+  expiresAt  DateTime?
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+
+  @@index([projectId])
+}
+
+enum AccessTokenRole {
+  CLIENT // can view, chat, approve milestones, pay
+  READONLY // view only
 }
 
 model Session {
@@ -67,22 +103,22 @@ model Session {
 // ─────────────────────────── Catalog ──────────────────────────────────────
 
 model Package {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  description String
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  name          String
+  description   String
   // Price stored in lowest currency unit (paise / cents)
-  priceMinor  Int
-  currency    String   @default("INR")
-  concepts    Int
-  revisions   Int
-  deliveryDays Int
+  priceMinor    Int
+  currency      String   @default("INR")
+  concepts      Int
+  revisions     Int
+  deliveryDays  Int
   includedFiles String[]
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  orders      Order[]
+  orders Order[]
 }
 
 model Addon {
@@ -107,9 +143,11 @@ enum ProjectMode {
 }
 
 enum ProjectStatus {
-  DRAFT          // order being built
-  AWAITING_PAYMENT
-  PAID           // funds escrowed
+  DRAFT // order being built; either side can edit
+  AWAITING_APPROVAL // submitted; both designer + manager (in COLLAB) must approve
+  SCOPE_APPROVED // both parties approved — scope locked, client can now pay
+  AWAITING_PAYMENT // legacy alias for SCOPE_APPROVED (pre-payment) — retained for back-compat
+  PAID // funds escrowed
   IN_PROGRESS
   IN_REVIEW
   REVISION_REQUESTED
@@ -119,82 +157,88 @@ enum ProjectStatus {
 }
 
 model Project {
-  id          String   @id @default(cuid())
-  code        String   @unique // human-readable e.g. DD-A1B2
-  title       String
-  briefMd     String?
+  id      String  @id @default(cuid())
+  code    String  @unique // human-readable e.g. DD-A1B2
+  title   String
+  briefMd String?
 
-  mode        ProjectMode
-  status      ProjectStatus @default(DRAFT)
+  mode   ProjectMode
+  status ProjectStatus @default(DRAFT)
 
   // Parties
-  designerId  String
-  designer    User     @relation("DesignerProjects", fields: [designerId], references: [id])
-  managerId   String?
-  manager     User?    @relation("ManagerProjects", fields: [managerId], references: [id])
-  clientId    String
-  client      User     @relation("ClientProjects", fields: [clientId], references: [id])
+  designerId      String
+  designer        User          @relation("DesignerProjects", fields: [designerId], references: [id])
+  managerId       String?
+  manager         User?         @relation("ManagerProjects", fields: [managerId], references: [id])
+  clientContactId String
+  clientContact   ClientContact @relation("ClientContactProjects", fields: [clientContactId], references: [id])
+
+  // Mutual scope approval. In COLLAB both must be set to advance to SCOPE_APPROVED;
+  // in SOLO only designerApprovedAt is required.
+  designerApprovedAt DateTime?
+  managerApprovedAt  DateTime?
 
   // Split (in collab). Designer + Manager bps must sum to <= 10000 (rest = platform fee).
-  designerBps Int      @default(6000)
-  managerBps  Int      @default(4000)
-  platformFeeBps Int   @default(0)
+  designerBps    Int @default(6000)
+  managerBps     Int @default(4000)
+  platformFeeBps Int @default(0)
 
-  order       Order?
-  milestones  Milestone[]
-  messages    Message[]
-  deliverables Deliverable[]
-  disputes    Dispute[]
+  order         Order?
+  milestones    Milestone[]
+  messages      Message[]
+  deliverables  Deliverable[]
+  disputes      Dispute[]
   walletEntries WalletEntry[]
-  activityLogs ActivityLog[]
-  approvals   Approval[]
+  activityLogs  ActivityLog[]
+  approvals     Approval[]
+  accessTokens  ProjectAccessToken[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([designerId])
   @@index([managerId])
-  @@index([clientId])
+  @@index([clientContactId])
   @@index([status])
 }
 
 model Order {
-  id          String   @id @default(cuid())
-  projectId   String   @unique
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  id        String  @id @default(cuid())
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
-  packageId   String
-  package     Package  @relation(fields: [packageId], references: [id])
+  packageId String
+  package   Package @relation(fields: [packageId], references: [id])
 
   // Locked snapshot at confirmation time. Once locked, scope cannot change.
-  locked      Boolean  @default(false)
-  lockedAt    DateTime?
+  locked   Boolean   @default(false)
+  lockedAt DateTime?
 
-  packageNameSnapshot   String
-  packagePriceMinor     Int
-  currency              String   @default("INR")
-  taxBps                Int      @default(0)
-  subtotalMinor         Int
-  taxMinor              Int
-  totalMinor            Int
+  packageNameSnapshot String
+  packagePriceMinor   Int
+  currency            String @default("INR")
+  taxBps              Int    @default(0)
+  subtotalMinor       Int
+  taxMinor            Int
+  totalMinor          Int
 
   // Custom-quote support (for non-catalog work)
-  customQuote           Boolean  @default(false)
-  customNotes           String?
+  customQuote Boolean @default(false)
+  customNotes String?
 
-  addons       OrderAddon[]
-  payments     Payment[]
+  addons   OrderAddon[]
+  payments Payment[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model OrderAddon {
-  id          String   @id @default(cuid())
-  orderId     String
-  order       Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  addonId     String
-  addon       Addon    @relation(fields: [addonId], references: [id])
+  id           String @id @default(cuid())
+  orderId      String
+  order        Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  addonId      String
+  addon        Addon  @relation(fields: [addonId], references: [id])
   // Snapshot fields
   nameSnapshot String
   priceMinor   Int
@@ -214,23 +258,23 @@ enum MilestoneKind {
 enum MilestoneStatus {
   PENDING
   IN_PROGRESS
-  SUBMITTED       // deliverable uploaded, awaiting client approval
-  APPROVED        // funds released
-  REJECTED        // revision requested
+  SUBMITTED // deliverable uploaded, awaiting client approval
+  APPROVED // funds released
+  REJECTED // revision requested
   DISPUTED
 }
 
 model Milestone {
-  id          String   @id @default(cuid())
+  id          String          @id @default(cuid())
   projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   kind        MilestoneKind
   title       String
   description String?
   // Portion of escrow released on approval (in basis points of total).
   releaseBps  Int
   amountMinor Int
-  currency    String   @default("INR")
+  currency    String          @default("INR")
   order       Int
   status      MilestoneStatus @default(PENDING)
   submittedAt DateTime?
@@ -240,36 +284,36 @@ model Milestone {
   deliverables Deliverable[]
   approvals    Approval[]
 
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([projectId, order])
 }
 
 enum ApprovalKind {
-  CLIENT_APPROVE
-  DESIGNER_ACCEPT
-  MANAGER_SUBMIT
-  CLIENT_VERIFY
+  SCOPE_DESIGNER
+  SCOPE_MANAGER
+  MILESTONE_CLIENT
+  MILESTONE_DESIGNER_SUBMIT
 }
 
 model Approval {
-  id          String   @id @default(cuid())
+  id          String       @id @default(cuid())
   projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
   milestoneId String?
-  milestone   Milestone? @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
+  milestone   Milestone?   @relation(fields: [milestoneId], references: [id], onDelete: Cascade)
   kind        ApprovalKind
 
-  clientId    String?
-  client      User?    @relation("ClientApprovals", fields: [clientId], references: [id])
-  designerId  String?
-  designer    User?    @relation("DesignerApprovals", fields: [designerId], references: [id])
-  managerId   String?
-  manager     User?    @relation("ManagerApprovals", fields: [managerId], references: [id])
+  clientContactId String?
+  clientContact   ClientContact? @relation("ClientApprovals", fields: [clientContactId], references: [id])
+  designerId      String?
+  designer        User?          @relation("DesignerApprovals", fields: [designerId], references: [id])
+  managerId       String?
+  manager         User?          @relation("ManagerApprovals", fields: [managerId], references: [id])
 
-  note        String?
-  createdAt   DateTime @default(now())
+  note      String?
+  createdAt DateTime @default(now())
 
   @@index([projectId])
 }
@@ -277,23 +321,23 @@ model Approval {
 // ─────────────────────────── Deliverables ─────────────────────────────────
 
 model Deliverable {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
   milestoneId String?
   milestone   Milestone? @relation(fields: [milestoneId], references: [id], onDelete: SetNull)
 
-  version     Int      @default(1)
-  filename    String
-  storagePath String
-  mimetype    String
-  sizeBytes   Int
-  sha256      String
+  version      Int     @default(1)
+  filename     String
+  storagePath  String
+  mimetype     String
+  sizeBytes    Int
+  sha256       String
   scannedClean Boolean @default(false)
   uploadedById String
-  notes       String?
+  notes        String?
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([projectId, version])
 }
@@ -309,84 +353,84 @@ enum PaymentProvider {
 enum PaymentStatus {
   REQUIRES_PAYMENT
   PROCESSING
-  CAPTURED        // funds in platform escrow
+  CAPTURED // funds in platform escrow
   PARTIALLY_RELEASED
-  RELEASED        // all funds disbursed
+  RELEASED // all funds disbursed
   REFUNDED
   FAILED
   CANCELLED
 }
 
 model Payment {
-  id              String   @id @default(cuid())
-  orderId         String
-  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id      String @id @default(cuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
-  provider        PaymentProvider
-  providerIntentId String? @unique // pi_... or rzp_...
+  provider         PaymentProvider
+  providerIntentId String?         @unique // pi_... or rzp_...
   providerChargeId String?
-  clientSecret    String?
+  clientSecret     String?
 
-  amountMinor     Int
-  currency        String   @default("INR")
-  status          PaymentStatus @default(REQUIRES_PAYMENT)
-  capturedAt      DateTime?
-  releasedAt      DateTime?
+  amountMinor Int
+  currency    String        @default("INR")
+  status      PaymentStatus @default(REQUIRES_PAYMENT)
+  capturedAt  DateTime?
+  releasedAt  DateTime?
 
   // Escrow accounting
-  releasedMinor   Int      @default(0)
-  refundedMinor   Int      @default(0)
+  releasedMinor Int @default(0)
+  refundedMinor Int @default(0)
 
-  rawWebhook      Json?
+  rawWebhook Json?
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  walletEntries   WalletEntry[]
-  transfers       Transfer[]
+  walletEntries WalletEntry[]
+  transfers     Transfer[]
 }
 
 model Transfer {
-  id              String   @id @default(cuid())
-  paymentId       String
-  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
-  recipientUserId String
-  amountMinor     Int
-  currency        String   @default("INR")
+  id                 String  @id @default(cuid())
+  paymentId          String
+  payment            Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  recipientUserId    String
+  amountMinor        Int
+  currency           String  @default("INR")
   providerTransferId String? @unique
-  status          String   @default("pending") // pending|completed|failed
-  failureReason   String?
+  status             String  @default("pending") // pending|completed|failed
+  failureReason      String?
 
-  createdAt       DateTime @default(now())
+  createdAt DateTime @default(now())
 }
 
 enum WalletEntryKind {
-  ESCROW_HOLD       // client paid into platform
-  ESCROW_RELEASE    // designer / manager earned share
+  ESCROW_HOLD // client paid into platform
+  ESCROW_RELEASE // designer / manager earned share
   PLATFORM_FEE
   REFUND
-  PAYOUT            // wired out to connected account
+  PAYOUT // wired out to connected account
   ADJUSTMENT
 }
 
 model WalletEntry {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  projectId   String?
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  paymentId   String?
-  payment     Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
 
   kind        WalletEntryKind
   // Signed amount: positive = credit to user, negative = debit
   amountMinor Int
-  currency    String   @default("INR")
+  currency    String          @default("INR")
   // pending|available|locked
-  state       String   @default("available")
+  state       String          @default("available")
   description String?
 
-  createdAt   DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([userId, state])
 }
@@ -394,17 +438,22 @@ model WalletEntry {
 // ─────────────────────────── Chat / Messaging ─────────────────────────────
 
 model Message {
-  id          String   @id @default(cuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  senderId    String
-  sender      User     @relation(fields: [senderId], references: [id])
-  body        String
+  id                    String         @id @default(cuid())
+  projectId             String
+  project               Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // Exactly one of senderUserId / senderClientContactId is set.
+  senderUserId          String?
+  senderUser            User?          @relation(fields: [senderUserId], references: [id])
+  senderClientContactId String?
+  senderClient          ClientContact? @relation(fields: [senderClientContactId], references: [id])
+  // Cached display name (so client display name still resolves if contact is updated)
+  senderName            String
+  body                  String
   // Hash chains messages → tamper-evident audit
-  prevHash    String?
-  hash        String   @unique
-  attachments Json?    // array of {filename, storagePath, mimetype, sizeBytes}
-  createdAt   DateTime @default(now())
+  prevHash              String?
+  hash                  String         @unique
+  attachments           Json? // array of {filename, storagePath, mimetype, sizeBytes}
+  createdAt             DateTime       @default(now())
 
   @@index([projectId, createdAt])
 }
@@ -420,34 +469,36 @@ enum DisputeStatus {
 }
 
 model Dispute {
-  id          String   @id @default(cuid())
-  projectId   String
-  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  raisedById  String
-  raisedBy    User     @relation("DisputeRaiser", fields: [raisedById], references: [id])
-  reason      String
-  status      DisputeStatus @default(OPEN)
-  resolutionNotes String?
-  refundedMinor Int   @default(0)
-  releasedMinor Int   @default(0)
+  id                      String        @id @default(cuid())
+  projectId               String
+  project                 Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  // One of raisedById / raisedByClientContactId is set.
+  raisedById              String?
+  raisedBy                User?         @relation("DisputeRaiser", fields: [raisedById], references: [id])
+  raisedByClientContactId String?
+  reason                  String
+  status                  DisputeStatus @default(OPEN)
+  resolutionNotes         String?
+  refundedMinor           Int           @default(0)
+  releasedMinor           Int           @default(0)
 
-  createdAt   DateTime @default(now())
-  resolvedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  resolvedAt DateTime?
 }
 
 // ─────────────────────────── Activity / Audit ─────────────────────────────
 
 model ActivityLog {
-  id          String   @id @default(cuid())
-  actorId     String?
-  actor       User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
-  projectId   String?
-  project     Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  action      String
-  metadata    Json?
-  ip          String?
-  userAgent   String?
-  createdAt   DateTime @default(now())
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  action    String
+  metadata  Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
 
   @@index([projectId, createdAt])
   @@index([actorId, createdAt])
@@ -456,14 +507,14 @@ model ActivityLog {
 // ─────────────────────────── Notifications ────────────────────────────────
 
 model Notification {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title       String
-  body        String
-  href        String?
-  readAt      DateTime?
-  createdAt   DateTime @default(now())
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  body      String
+  href      String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
 
   @@index([userId, readAt])
 }

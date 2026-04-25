@@ -11,16 +11,23 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     include: {
       designer: { select: { id: true, name: true, email: true, stripeAccountId: true, payoutsEnabled: true } },
       manager: { select: { id: true, name: true, email: true, stripeAccountId: true, payoutsEnabled: true } },
-      client: { select: { id: true, name: true, email: true } },
+      clientContact: { select: { id: true, name: true, email: true } },
       order: { include: { addons: true, payments: true } },
       milestones: { orderBy: { order: "asc" }, include: { deliverables: true } },
-      messages: { orderBy: { createdAt: "asc" }, include: { sender: { select: { id: true, name: true, role: true } } } },
+      messages: {
+        orderBy: { createdAt: "asc" },
+        include: {
+          senderUser: { select: { id: true, name: true, role: true } },
+          senderClient: { select: { id: true, name: true, email: true } },
+        },
+      },
       disputes: true,
+      accessTokens: { where: { revokedAt: null }, orderBy: { createdAt: "desc" } },
       activityLogs: { orderBy: { createdAt: "desc" }, take: 100, include: { actor: { select: { id: true, name: true, role: true } } } },
     },
   });
   if (!project) notFound();
-  if (![project.designerId, project.managerId, project.clientId].includes(me.id) && me.role !== "ADMIN") {
+  if (![project.designerId, project.managerId].includes(me.id) && me.role !== "ADMIN") {
     notFound();
   }
   // Convert dates for client component

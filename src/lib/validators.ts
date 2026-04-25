@@ -4,7 +4,7 @@ export const SignupSchema = z.object({
   email: z.string().email().max(255),
   name: z.string().min(1).max(120),
   password: z.string().min(8).max(200),
-  role: z.enum(["DESIGNER", "CLIENT_MANAGER", "CLIENT"]).default("DESIGNER"),
+  role: z.enum(["DESIGNER", "CLIENT_MANAGER"]).default("DESIGNER"),
 });
 
 export const LoginSchema = z.object({
@@ -27,6 +27,10 @@ export const CreateProjectSchema = z.object({
   customQuote: z.boolean().default(false),
   customNotes: z.string().max(5_000).optional(),
   customAmountMinor: z.number().int().min(0).max(1_000_000_000).optional(),
+});
+
+export const ApproveScopeSchema = z.object({
+  note: z.string().max(2000).optional(),
 });
 
 export const SendMessageSchema = z.object({

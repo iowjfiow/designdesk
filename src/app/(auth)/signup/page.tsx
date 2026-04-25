@@ -11,7 +11,7 @@ export default function SignupPage() {
     name: "",
     email: "",
     password: "",
-    role: "DESIGNER" as "DESIGNER" | "CLIENT_MANAGER" | "CLIENT",
+    role: "DESIGNER" as "DESIGNER" | "CLIENT_MANAGER",
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -42,7 +42,7 @@ export default function SignupPage() {
       <div className="surface p-8">
         <h1 className="text-2xl font-semibold tracking-tight">Create your account</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Choose the role you&apos;ll use most. You can use any role to participate in projects.
+          Designers create projects and deliver work. Client Managers bring in clients and approve scopes. Clients themselves don&apos;t need an account — they receive a private link by email.
         </p>
         <form onSubmit={onSubmit} className="mt-6 space-y-4">
           <label className="block text-sm">
@@ -66,7 +66,6 @@ export default function SignupPage() {
             >
               <option value="DESIGNER">Designer (creator)</option>
               <option value="CLIENT_MANAGER">Client Manager (collaboration partner)</option>
-              <option value="CLIENT">Client</option>
             </select>
           </label>
           {error ? <p className="text-sm text-danger">{error}</p> : null}

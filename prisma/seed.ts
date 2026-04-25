@@ -73,7 +73,7 @@ async function main() {
   const mk = (local: string) => local + at + domain;
   const designerEmail = mk("designer");
   const managerEmail = mk("manager");
-  const clientEmail = mk("client");
+  const clientContactEmail = mk("demo-client");
   const adminEmail = mk("admin");
   const designer = await prisma.user.upsert({
     where: { email: designerEmail },
@@ -85,10 +85,11 @@ async function main() {
     update: { passwordHash: password, role: "CLIENT_MANAGER", name: "Mira Manager" },
     create: { email: managerEmail, name: "Mira Manager", passwordHash: password, role: "CLIENT_MANAGER" },
   });
-  const client = await prisma.user.upsert({
-    where: { email: clientEmail },
-    update: { passwordHash: password, role: "CLIENT", name: "Carla Client" },
-    create: { email: clientEmail, name: "Carla Client", passwordHash: password, role: "CLIENT" },
+  // Clients are magic-link only — they do not get a User account, only a ClientContact row.
+  const client = await prisma.clientContact.upsert({
+    where: { email: clientContactEmail },
+    update: { name: "Carla Client" },
+    create: { email: clientContactEmail, name: "Carla Client" },
   });
   const admin = await prisma.user.upsert({
     where: { email: adminEmail },
