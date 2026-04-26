@@ -126,9 +126,14 @@ export function OrderForm() {
 
   async function submit() {
     setError(null);
-    if (!packageId) return setError("Pick a package.");
     if (title.trim().length < 2) return setError("Project title is required.");
+    if (briefMd.trim().length < 10)
+      return setError("Project description is required (10+ characters so the designer can understand it).");
+    if (!packageId) return setError("Pick a base package — what type of design do you need?");
+    if (!clientName.trim()) return setError("Your name is required.");
     if (!clientEmail.includes("@")) return setError("A valid email is required so we can reach you.");
+    if (clientPhone.replace(/\D/g, "").length < 7)
+      return setError("A valid phone number is required (at least 7 digits).");
     setSubmitting(true);
     try {
       const refs = references
@@ -180,18 +185,19 @@ export function OrderForm() {
               <Input placeholder="e.g. Brand identity for my coffee roastery" value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>
             <Field>
-              <Label>Brief (optional but encouraged)</Label>
+              <Label>Description *</Label>
               <Textarea
                 placeholder="Markdown welcome — colours you love, brands you admire, what your business does, any constraints…"
                 value={briefMd}
                 onChange={(e) => setBriefMd(e.target.value)}
               />
+              <p className="mt-1 text-xs text-muted-foreground">10+ characters. Tell the designer what you actually want — the more concrete, the better.</p>
             </Field>
           </div>
         </Card>
 
         <Card>
-          <SectionHeader step="2" icon={<Package className="h-4 w-4" />} title="Pick a package" subtitle="Every package can be customised with add-ons below." />
+          <SectionHeader step="2" icon={<Package className="h-4 w-4" />} title="Pick a package *" subtitle="Every package can be customised with add-ons below. One is required." />
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {packages.map((p) => {
               const active = packageId === p.id;
@@ -357,12 +363,19 @@ export function OrderForm() {
           <SectionHeader step="4" icon={<User className="h-4 w-4" />} title="Your contact info" subtitle="So your designer can reach you. We never share this." />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <Field>
+              <Label>Your name *</Label>
+              <Input placeholder="Carla Chen" value={clientName} onChange={(e) => setClientName(e.target.value)} />
+            </Field>
+            <Field>
               <Label>Email *</Label>
               <Input type="email" placeholder="you@brand.com" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
             </Field>
             <Field>
-              <Label>Your name</Label>
-              <Input placeholder="Carla Chen" value={clientName} onChange={(e) => setClientName(e.target.value)} />
+              <Label>
+                <Mail className="mr-1 inline h-3 w-3" />
+                Phone *
+              </Label>
+              <Input type="tel" placeholder="+91 90000 00000" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} />
             </Field>
             <Field>
               <Label>
@@ -370,13 +383,6 @@ export function OrderForm() {
                 Company
               </Label>
               <Input placeholder="Acme Coffee Co." value={clientCompany} onChange={(e) => setClientCompany(e.target.value)} />
-            </Field>
-            <Field>
-              <Label>
-                <Mail className="mr-1 inline h-3 w-3" />
-                Phone
-              </Label>
-              <Input type="tel" placeholder="+91 90000 00000" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} />
             </Field>
             <Field className="sm:col-span-2">
               <Label>

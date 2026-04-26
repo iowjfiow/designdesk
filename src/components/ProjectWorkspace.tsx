@@ -8,10 +8,13 @@ import { Textarea } from "@/components/ui/Input";
 import { formatMoney } from "@/lib/money";
 import {
   AlertTriangle,
+  Archive,
+  ArchiveRestore,
   Briefcase,
   Building2,
   Calendar,
   Check,
+  CheckCircle2,
   Circle,
   Clipboard,
   Copy,
@@ -23,6 +26,7 @@ import {
   Send,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   Sparkles,
   Upload,
   Users,
@@ -45,6 +49,7 @@ type ProjectDetail = {
   briefMd: string | null;
   mode: "SOLO" | "COLLAB";
   status: string;
+  archivedAt: string | null;
   designerId: string | null;
   managerId: string | null;
   clientContactId: string;
@@ -388,13 +393,18 @@ export function ProjectWorkspace({ project, meId, meRole }: { project: ProjectDe
               <ShieldAlert className="h-4 w-4 text-warning" />
               <CardTitle>Dispute</CardTitle>
             </div>
-            {project.disputes.length > 0 ? (
-              <div className="mt-2 rounded-lg border border-danger/30 bg-danger/5 p-3 text-xs text-danger">
-                <div className="flex items-center gap-1.5 font-medium">
-                  <AlertTriangle className="h-3.5 w-3.5" /> Dispute open — escrow frozen
+            {project.status === "DISPUTED" && project.disputes.length > 0 ? (
+              <div className="mt-2 space-y-3">
+                <div className="rounded-lg border border-danger/30 bg-danger/5 p-3 text-xs text-danger">
+                  <div className="flex items-center gap-1.5 font-medium">
+                    <AlertTriangle className="h-3.5 w-3.5" /> Dispute open — escrow frozen
+                  </div>
+                  {project.disputes[0]?.reason ? (
+                    <p className="mt-1 text-foreground/80">&ldquo;{project.disputes[0].reason}&rdquo;</p>
+                  ) : null}
                 </div>
-                {project.disputes[0]?.reason ? (
-                  <p className="mt-1 text-foreground/80">&ldquo;{project.disputes[0].reason}&rdquo;</p>
+                {(isDesigner || isManager || isAdmin) ? (
+                  <ResolveDisputeButton projectId={project.id} onResolved={() => router.refresh()} />
                 ) : null}
               </div>
             ) : project.status === "COMPLETED" ? (
@@ -403,6 +413,21 @@ export function ProjectWorkspace({ project, meId, meRole }: { project: ProjectDe
               <DisputeForm projectId={project.id} />
             )}
           </Card>
+
+          {project.status === "COMPLETED" && (isDesigner || isManager || isAdmin) ? (
+            <Card>
+              <div className="flex items-center gap-2">
+                <Archive className="h-4 w-4 text-accent" />
+                <CardTitle>Archive</CardTitle>
+              </div>
+              <CardSubtitle className="mt-1">
+                {project.archivedAt
+                  ? `Archived on ${new Date(project.archivedAt).toLocaleDateString()}.`
+                  : "Project is complete. Archive it to clean up your active list."}
+              </CardSubtitle>
+              <ArchiveButton projectId={project.id} archived={!!project.archivedAt} onChanged={() => router.refresh()} />
+            </Card>
+          ) : null}
         </aside>
       </div>
     </div>
@@ -613,6 +638,96 @@ function DeliverableUploader({ projectId, milestoneId, onUploaded }: { projectId
         Upload
       </Button>
     </>
+  );
+}
+
+function ResolveDisputeButton({ projectId, onResolved }: { projectId: string; onResolved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [notes, setNotes] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function go() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/dispute/resolve`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ resolutionNotes: notes.trim() || undefined }),
+      });
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error ?? "Could not resolve");
+      setOpen(false);
+      setNotes("");
+      onResolved();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!open) {
+    return (
+      <Button size="sm" variant="accent" onClick={() => setOpen(true)}>
+        <ShieldCheck className="h-3.5 w-3.5" />
+        Mark dispute resolved
+      </Button>
+    );
+  }
+  return (
+    <div className="space-y-2 rounded-lg border border-border bg-card p-3">
+      <Textarea
+        value={notes}
+        onChange={(e) => setNotes(e.target.value)}
+        placeholder="Optional resolution notes — what was agreed?"
+        rows={3}
+      />
+      {err ? <div className="text-xs text-danger">{err}</div> : null}
+      <div className="flex justify-end gap-2">
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+        <Button size="sm" variant="accent" loading={busy} onClick={go}>
+          <CheckCircle2 className="h-3.5 w-3.5" /> Confirm resolved
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function ArchiveButton({
+  projectId,
+  archived,
+  onChanged,
+}: {
+  projectId: string;
+  archived: boolean;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function toggle() {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/archive`, {
+        method: archived ? "DELETE" : "POST",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "Failed");
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-3 space-y-2">
+      <Button size="sm" variant={archived ? "outline" : "accent"} loading={busy} onClick={toggle}>
+        {archived ? <ArchiveRestore className="h-3.5 w-3.5" /> : <Archive className="h-3.5 w-3.5" />}
+        {archived ? "Restore project" : "Archive project"}
+      </Button>
+      {err ? <div className="text-xs text-danger">{err}</div> : null}
+    </div>
   );
 }
 

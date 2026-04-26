@@ -2,7 +2,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { Card, CardSubtitle, CardTitle } from "@/components/ui/Card";
-import { StatusPill, Badge } from "@/components/ui/Badge";
+import { StatusPill } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatMoney } from "@/lib/money";
 import { ArrowRight, ArrowUpRight, Briefcase, Inbox, Plus, Wallet, Clock, Sparkles, Star, Hand } from "lucide-react";
@@ -11,10 +11,10 @@ export default async function DashboardOverview() {
   const me = await requireUser();
   const [projects, wallet, unread, inboxCount] = await Promise.all([
     prisma.project.findMany({
-      where: { OR: [{ designerId: me.id }, { managerId: me.id }] },
+      where: { archivedAt: null, OR: [{ designerId: me.id }, { managerId: me.id }] },
       orderBy: { updatedAt: "desc" },
       take: 6,
-      include: { order: true, clientContact: true },
+      include: { order: true, clientContact: true, milestones: true },
     }),
     prisma.walletEntry.findMany({ where: { userId: me.id } }),
     prisma.notification.count({ where: { userId: me.id, readAt: null } }),
@@ -146,35 +146,43 @@ export default async function DashboardOverview() {
             </div>
           </Card>
         ) : (
-          <div className="grid gap-3">
-            {projects.map((p) => (
-              <Link
-                key={p.id}
-                href={`/dashboard/projects/${p.id}`}
-                className="surface card-glow group flex items-center justify-between gap-4 p-5"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-base font-semibold">{p.title}</span>
-                    <Badge variant={p.mode === "SOLO" ? "muted" : "accent"}>{p.mode}</Badge>
+          <Card className="p-0 overflow-hidden">
+            <div className="divide-y divide-border">
+              {projects.map((p) => {
+                const total = p.milestones.reduce((s, m) => s + m.amountMinor, 0);
+                const released = p.milestones.filter((m) => m.status === "APPROVED").reduce((s, m) => s + m.amountMinor, 0);
+                const pct = total === 0 ? 0 : Math.round((released / total) * 100);
+                const initial = (p.title || p.code).slice(0, 1).toUpperCase();
+                const tones = ["from-indigo-500 to-violet-500", "from-emerald-500 to-teal-500", "from-amber-500 to-orange-500", "from-pink-500 to-rose-500", "from-sky-500 to-cyan-500", "from-fuchsia-500 to-pink-500"];
+                const tone = tones[(p.code.charCodeAt(p.code.length - 1) ?? 0) % tones.length];
+                return (
+                  <Link
+                    key={p.id}
+                    href={`/dashboard/projects/${p.id}`}
+                    className="group grid grid-cols-[44px_1fr_180px_120px_110px_24px] items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/30"
+                  >
+                    <span className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${tone} text-base font-semibold text-white shadow-md`}>
+                      {initial}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-semibold">{p.title}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {p.clientContact?.company ?? p.clientContact?.name ?? p.clientContact?.email ?? "—"}
+                      </div>
+                    </div>
+                    <div className="hidden lg:block">
+                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div className={`h-full rounded-full bg-gradient-to-r ${tone} transition-[width]`} style={{ width: `${pct}%` }} />
+                      </div>
+                    </div>
+                    <div className="hidden text-xs text-muted-foreground tabular-nums lg:block">{pct}% · {p.order ? formatMoney(p.order.totalMinor, p.order.currency) : "—"}</div>
                     <StatusPill status={p.status} />
-                  </div>
-                  <div className="mt-1 truncate text-xs text-muted-foreground">
-                    <span className="font-mono">{p.code}</span> · client: {p.clientContact?.name ?? p.clientContact?.email ?? "—"}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-base font-semibold tracking-tight">
-                    {p.order ? formatMoney(p.order.totalMinor, p.order.currency) : "—"}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Updated {new Date(p.updatedAt).toLocaleDateString()}
-                  </div>
-                </div>
-                <ArrowUpRight className="hidden h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-accent sm:block" />
-              </Link>
-            ))}
-          </div>
+                    <ArrowUpRight className="hidden h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-accent sm:block" />
+                  </Link>
+                );
+              })}
+            </div>
+          </Card>
         )}
       </section>
     </div>

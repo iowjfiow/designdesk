@@ -22,6 +22,17 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     if (!(file instanceof File)) return fail(400, "Missing file");
     if (!milestoneId) return fail(400, "Missing milestoneId");
 
+    const milestone = await prisma.milestone.findFirst({
+      where: { id: milestoneId, projectId: id },
+    });
+    if (!milestone) return fail(404, "Milestone not found");
+    // Once the client has approved a milestone, files are locked. Designers
+    // can re-upload (creating a new version) up until that approval.
+    if (milestone.status === "APPROVED") {
+      return fail(409, "Files are locked — the client already approved this milestone.");
+    }
+    if (project.archivedAt) return fail(409, "Project is archived");
+
     const stored = await storeFile(`projects/${id}/${milestoneId}`, file);
 
     const lastVersion = await prisma.deliverable.findFirst({

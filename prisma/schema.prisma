@@ -231,6 +231,11 @@ model Project {
   accessTokens  ProjectAccessToken[]
   reviews       Review[]
 
+  // Archive flag — set when a COMPLETED project is moved out of the
+  // active dashboard. Doesn't delete data; archived projects can still
+  // be viewed via direct URL but no longer surface in the projects list.
+  archivedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -238,6 +243,7 @@ model Project {
   @@index([managerId])
   @@index([clientContactId])
   @@index([status])
+  @@index([archivedAt])
 }
 
 model Order {
