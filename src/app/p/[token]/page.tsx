@@ -19,7 +19,7 @@ export default async function MagicLinkPage({ params }: { params: Promise<{ toke
     include: {
       designer: { select: { id: true, name: true, email: true } },
       manager: { select: { id: true, name: true, email: true } },
-      clientContact: { select: { id: true, name: true, email: true } },
+      clientContact: { select: { id: true, name: true, email: true, company: true, phone: true, website: true } },
       order: { include: { addons: true, payments: true } },
       milestones: { orderBy: { order: "asc" }, include: { deliverables: true } },
       messages: {

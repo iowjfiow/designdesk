@@ -5,7 +5,7 @@ export async function GET() {
   try {
     const addons = await prisma.addon.findMany({
       where: { active: true },
-      orderBy: { priceMinor: "asc" },
+      orderBy: [{ category: "asc" }, { sortOrder: "asc" }, { priceMinor: "asc" }],
     });
     return ok({ addons });
   } catch (e) {

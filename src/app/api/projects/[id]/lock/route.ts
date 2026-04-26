@@ -3,7 +3,9 @@ import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { ok, fail, handleError } from "@/lib/http";
 import { logActivity } from "@/lib/activity";
-import { bpsOf } from "@/lib/money";
+import { bpsOf, formatMoney } from "@/lib/money";
+import { sendEmail } from "@/lib/email";
+import { notifyMany } from "@/lib/notify";
 
 /**
  * Mutual scope approval. Each side (Designer / Client Manager) calls this once
@@ -133,6 +135,56 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
       action: "order.locked",
       metadata: { totalMinor: total, currency: project.order.currency },
     });
+
+    // Confirmation emails — both the client and the designer/manager get a
+    // copy summarising the locked scope. Magic-link is intentionally omitted
+    // (the client already has it from the initial invite email).
+    const detailed = await prisma.project.findUnique({
+      where: { id: project.id },
+      include: {
+        clientContact: { select: { email: true, name: true } },
+        designer: { select: { email: true, name: true } },
+        manager: { select: { email: true, name: true } },
+        order: { include: { addons: true } },
+      },
+    });
+    if (detailed?.order) {
+      const detailedOrder = detailed.order;
+      const totalText = formatMoney(detailedOrder.totalMinor, detailedOrder.currency);
+      const lineItems = [
+        `${detailedOrder.packageNameSnapshot} — ${formatMoney(detailedOrder.packagePriceMinor, detailedOrder.currency)}`,
+        ...detailedOrder.addons.map(
+          (a) => `+ ${a.nameSnapshot} — ${formatMoney(a.priceMinor, detailedOrder.currency)}`,
+        ),
+      ].join("\n");
+      const summary = `Project: ${detailed.code} — ${detailed.title}\nTotal: ${totalText} (incl. tax)\n\nScope:\n${lineItems}`;
+
+      const sendOne = async (to: string | undefined, name: string | null | undefined, role: "client" | "team") => {
+        if (!to) return;
+        const greeting = name ? `Hi ${name}` : "Hi";
+        const intro =
+          role === "client"
+            ? `Your scope has been confirmed and the order is locked. The agreed total is ${totalText} (incl. tax). You can now proceed to payment via your project page.`
+            : `Scope is locked and the order is awaiting payment from the client. Total: ${totalText}.`;
+        await sendEmail({
+          to,
+          subject: `${detailed.code} — order confirmed`,
+          bodyText: `${greeting},\n\n${intro}\n\n${summary}\n\n— DesignDesk`,
+        });
+      };
+      await Promise.all([
+        sendOne(detailed.clientContact?.email, detailed.clientContact?.name ?? null, "client"),
+        sendOne(detailed.designer?.email, detailed.designer?.name ?? null, "team"),
+        sendOne(detailed.manager?.email, detailed.manager?.name ?? null, "team"),
+      ]);
+      const recipients = [detailed.designer?.email && project.designerId, detailed.manager?.email && project.managerId]
+        .filter((x): x is string => typeof x === "string");
+      await notifyMany(recipients, {
+        title: `${detailed.code} — order confirmed`,
+        body: `Scope locked at ${totalText}. Awaiting client payment.`,
+        href: `/dashboard/projects/${project.id}`,
+      });
+    }
 
     return ok({ ok: true, fullyApproved: true });
   } catch (e) {

@@ -11,7 +11,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
     include: {
       designer: { select: { id: true, name: true, email: true, stripeAccountId: true, payoutsEnabled: true } },
       manager: { select: { id: true, name: true, email: true, stripeAccountId: true, payoutsEnabled: true } },
-      clientContact: { select: { id: true, name: true, email: true } },
+      clientContact: { select: { id: true, name: true, email: true, company: true, phone: true, website: true } },
       order: { include: { addons: true, payments: true } },
       milestones: { orderBy: { order: "asc" }, include: { deliverables: true } },
       messages: {
@@ -32,5 +32,5 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
   }
   // Convert dates for client component
   const serializable = JSON.parse(JSON.stringify(project));
-  return <ProjectWorkspace project={serializable} meId={me.id} />;
+  return <ProjectWorkspace project={serializable} meId={me.id} meRole={me.role} />;
 }

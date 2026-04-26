@@ -86,3 +86,17 @@ export async function readClientCookie(projectId: string): Promise<string | null
 export function buildMagicLinkPath(token: string): string {
   return `/p/${token}`;
 }
+
+// Resolve the magic-link client for a given project from the per-project
+// httpOnly cookie. Returns the ClientContact if and only if the cookie carries
+// a valid token bound to this project.
+export async function resolveClientFromCookie(
+  _req: unknown,
+  projectId: string,
+): Promise<ClientContact | null> {
+  const raw = await readClientCookie(projectId);
+  if (!raw) return null;
+  const ctx = await resolveAccessToken(raw);
+  if (!ctx || ctx.projectId !== projectId || !ctx.clientContact) return null;
+  return ctx.clientContact;
+}

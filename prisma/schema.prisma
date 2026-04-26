@@ -25,6 +25,10 @@ model User {
   name              String?
   passwordHash      String
   role              Role      @default(DESIGNER)
+  // Profile fields editable from /dashboard/settings.
+  phone             String?
+  timezone          String?
+  bio               String?
   emailVerifiedAt   DateTime?
   mfaEnabled        Boolean   @default(false)
   mfaSecret         String?
@@ -54,12 +58,18 @@ model ClientContact {
   id        String   @id @default(cuid())
   email     String   @unique
   name      String?
+  // Optional richer contact info (collected on public order page).
+  company   String?
+  phone     String?
+  website   String?
+  notes     String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   projects  Project[]  @relation("ClientContactProjects")
   approvals Approval[] @relation("ClientApprovals")
   messages  Message[]
+  reviews   Review[]
 }
 
 // Signed access tokens granting a magic-link client (or anyone holding it)
@@ -102,35 +112,59 @@ model Session {
 
 // ─────────────────────────── Catalog ──────────────────────────────────────
 
+enum PackageCategory {
+  LOGO_ONLY
+  BUSINESS_KIT
+  BRAND_KIT
+  BRAND_KIT_SOCIAL
+  FULL_IDENTITY
+  CUSTOM
+}
+
 model Package {
-  id            String   @id @default(cuid())
-  slug          String   @unique
+  id            String          @id @default(cuid())
+  slug          String          @unique
   name          String
   description   String
+  category      PackageCategory @default(LOGO_ONLY)
   // Price stored in lowest currency unit (paise / cents)
   priceMinor    Int
-  currency      String   @default("INR")
+  currency      String          @default("INR")
   concepts      Int
   revisions     Int
   deliveryDays  Int
   includedFiles String[]
-  active        Boolean  @default(true)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  highlights    String[]        @default([])
+  popular       Boolean         @default(false)
+  active        Boolean         @default(true)
+  sortOrder     Int             @default(100)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   orders Order[]
 }
 
+enum AddonCategory {
+  FORMAT
+  MOCKUP
+  BRAND_ASSET
+  SOCIAL_MEDIA
+  USAGE_RIGHTS
+  EXTRA
+}
+
 model Addon {
-  id          String   @id @default(cuid())
-  slug        String   @unique
+  id          String        @id @default(cuid())
+  slug        String        @unique
   name        String
   description String
+  category    AddonCategory @default(EXTRA)
   priceMinor  Int
-  currency    String   @default("INR")
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  currency    String        @default("INR")
+  active      Boolean       @default(true)
+  sortOrder   Int           @default(100)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   orderAddons OrderAddon[]
 }
@@ -143,6 +177,7 @@ enum ProjectMode {
 }
 
 enum ProjectStatus {
+  INCOMING // submitted via public order page — awaiting designer/manager claim
   DRAFT // order being built; either side can edit
   AWAITING_APPROVAL // submitted; both designer + manager (in COLLAB) must approve
   SCOPE_APPROVED // both parties approved — scope locked, client can now pay
@@ -165,9 +200,15 @@ model Project {
   mode   ProjectMode
   status ProjectStatus @default(DRAFT)
 
-  // Parties
-  designerId      String
-  designer        User          @relation("DesignerProjects", fields: [designerId], references: [id])
+  // Optional richer scope info (collected on public order or by editor).
+  deadline    DateTime?
+  budgetMinor Int?
+  references  String[]  @default([]) // free-form URLs or notes the client provided
+
+  // Parties — may be null when project came in from the public order page and
+  // hasn't been claimed yet (status=INCOMING).
+  designerId      String?
+  designer        User?         @relation("DesignerProjects", fields: [designerId], references: [id])
   managerId       String?
   manager         User?         @relation("ManagerProjects", fields: [managerId], references: [id])
   clientContactId String
@@ -192,6 +233,12 @@ model Project {
   activityLogs  ActivityLog[]
   approvals     Approval[]
   accessTokens  ProjectAccessToken[]
+  reviews       Review[]
+
+  // Archive flag — set when a COMPLETED project is moved out of the
+  // active dashboard. Doesn't delete data; archived projects can still
+  // be viewed via direct URL but no longer surface in the projects list.
+  archivedAt DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -200,6 +247,7 @@ model Project {
   @@index([managerId])
   @@index([clientContactId])
   @@index([status])
+  @@index([archivedAt])
 }
 
 model Order {
@@ -487,6 +535,29 @@ model Dispute {
 }
 
 // ─────────────────────────── Activity / Audit ─────────────────────────────
+
+// ──────────────────────────── Reviews ────────────────────────────────
+enum ReviewKind {
+  MILESTONE
+  FINAL
+}
+
+model Review {
+  id                String         @id @default(cuid())
+  projectId         String
+  project           Project        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  milestoneId       String?
+  // Author is always a magic-link client.
+  clientContactId   String
+  clientContact     ClientContact  @relation(fields: [clientContactId], references: [id])
+
+  kind              ReviewKind
+  rating            Int? // 1–5 stars (FINAL only)
+  comment           String
+  createdAt         DateTime       @default(now())
+
+  @@index([projectId, createdAt])
+}
 
 model ActivityLog {
   id        String   @id @default(cuid())
