@@ -9,10 +9,7 @@ import {
   Wallet,
   Settings,
   Users,
-  ListChecks,
-  FileText,
   BarChart3,
-  MessageSquare,
 } from "lucide-react";
 
 const NAV: { href: string; label: string; icon: React.ComponentType<{ className?: string }>; key: string }[] = [
@@ -20,11 +17,8 @@ const NAV: { href: string; label: string; icon: React.ComponentType<{ className?
   { href: "/dashboard/projects", label: "Projects", icon: Briefcase, key: "projects" },
   { href: "/dashboard/inbox", label: "Inbox", icon: Inbox, key: "inbox" },
   { href: "/dashboard/clients", label: "Clients", icon: Users, key: "clients" },
-  { href: "/dashboard/tasks", label: "Tasks", icon: ListChecks, key: "tasks" },
-  { href: "/dashboard/invoices", label: "Invoices", icon: FileText, key: "invoices" },
   { href: "/dashboard/wallet", label: "Wallet", icon: Wallet, key: "wallet" },
   { href: "/dashboard/reports", label: "Reports", icon: BarChart3, key: "reports" },
-  { href: "/dashboard/messages", label: "Messages", icon: MessageSquare, key: "messages" },
   { href: "/dashboard/notifications", label: "Notifications", icon: Bell, key: "notifications" },
   { href: "/dashboard/settings", label: "Settings", icon: Settings, key: "settings" },
 ];

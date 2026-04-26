@@ -25,6 +25,10 @@ model User {
   name              String?
   passwordHash      String
   role              Role      @default(DESIGNER)
+  // Profile fields editable from /dashboard/settings.
+  phone             String?
+  timezone          String?
+  bio               String?
   emailVerifiedAt   DateTime?
   mfaEnabled        Boolean   @default(false)
   mfaSecret         String?

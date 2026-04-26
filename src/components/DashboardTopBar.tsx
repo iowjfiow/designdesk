@@ -9,8 +9,10 @@ const TITLES: { match: (p: string) => boolean; title: string; subtitle: string }
   { match: (p) => p.startsWith("/dashboard/projects"), title: "Projects", subtitle: "Manage every project in one place." },
   { match: (p) => p.startsWith("/dashboard/inbox"), title: "Inbox", subtitle: "Public orders waiting to be claimed." },
   { match: (p) => p.startsWith("/dashboard/wallet"), title: "Wallet", subtitle: "Track escrow, available, and pending balances." },
-  { match: (p) => p.startsWith("/dashboard/notifications"), title: "Notifications", subtitle: "All your alerts in one place." },
-  { match: (p) => p.startsWith("/dashboard/settings"), title: "Settings", subtitle: "Configure your account and preferences." },
+  { match: (p) => p.startsWith("/dashboard/notifications"), title: "Notifications", subtitle: "Stay updated with everything that matters." },
+  { match: (p) => p.startsWith("/dashboard/reports"), title: "Reports", subtitle: "Track your performance and analyze your work." },
+  { match: (p) => p.startsWith("/dashboard/clients"), title: "Clients", subtitle: "Everyone you've worked with." },
+  { match: (p) => p.startsWith("/dashboard/settings"), title: "Settings", subtitle: "Manage your profile and account." },
 ];
 
 export function DashboardTopBar({
