@@ -2,10 +2,25 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardSubtitle, CardTitle } from "@/components/ui/Card";
-import { Badge } from "@/components/ui/Badge";
+import { Badge, StatusPill } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Input";
 import { formatMoney } from "@/lib/money";
+import {
+  AlertTriangle,
+  Check,
+  Circle,
+  Clipboard,
+  Copy,
+  KeyRound,
+  MessageSquare,
+  Send,
+  Shield,
+  ShieldAlert,
+  Sparkles,
+  Upload,
+  Users,
+} from "lucide-react";
 
 type Message = {
   id: string;
@@ -121,31 +136,43 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{project.title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {project.code} ·{" "}
-            <Badge variant={project.mode === "SOLO" ? "muted" : "accent"}>{project.mode}</Badge>{" "}
-            <Badge>{project.status.replace(/_/g, " ")}</Badge>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {project.code}
           </p>
+          <h1 className="mt-1 truncate text-2xl font-semibold tracking-tight">{project.title}</h1>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+            <Badge variant={project.mode === "SOLO" ? "muted" : "accent"}>{project.mode}</Badge>
+            <StatusPill status={project.status} />
+            <span className="text-muted-foreground">
+              · client {project.clientContact.email}
+            </span>
+          </div>
         </div>
         {project.status === "DISPUTED" ? (
-          <Badge variant="danger">Disputed — escrow frozen</Badge>
+          <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            <ShieldAlert className="h-4 w-4" />
+            <span>Disputed — escrow frozen</span>
+          </div>
         ) : null}
       </div>
 
       {err ? (
-        <Card className="border-danger text-danger">
-          <CardSubtitle>{err}</CardSubtitle>
-        </Card>
+        <div className="flex items-center gap-2 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          <AlertTriangle className="h-4 w-4" />
+          {err}
+        </div>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
         <div className="space-y-6">
           <Card>
-            <CardTitle>Workflow</CardTitle>
-            <CardSubtitle>Pricing freezes only after both parties approve.</CardSubtitle>
+            <div className="flex items-center gap-2">
+              <Shield className="h-4 w-4 text-accent" />
+              <CardTitle>Workflow</CardTitle>
+            </div>
+            <CardSubtitle className="mt-1">Pricing freezes only after both parties approve.</CardSubtitle>
             <ol className="mt-4 space-y-3 text-sm">
               <Step
                 done={designerApproved}
@@ -220,6 +247,9 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
           <Card>
             <CardTitle>Milestones</CardTitle>
             <CardSubtitle>Funds release as the client approves each milestone.</CardSubtitle>
+            {project.milestones.length > 0 ? (
+              <MilestoneProgress milestones={project.milestones} />
+            ) : null}
             <div className="mt-4 space-y-3">
               {project.milestones.map((m) => (
                 <MilestoneRow
@@ -243,12 +273,12 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
           <Card>
             <CardTitle>Activity log</CardTitle>
             <CardSubtitle>Tamper-evident audit of every action.</CardSubtitle>
-            <ul className="mt-3 max-h-72 space-y-1 overflow-auto text-xs text-muted-foreground">
+            <ul className="mt-3 max-h-72 space-y-1 overflow-auto pretty-scroll pr-1 text-xs text-muted-foreground">
               {project.activityLogs.map((a) => (
-                <li key={a.id} className="flex items-center justify-between gap-3">
+                <li key={a.id} className="flex items-center justify-between gap-3 rounded-md px-2 py-1 hover:bg-muted/40">
                   <span>
-                    <span className="text-foreground">{a.actor?.name ?? a.actor?.role ?? "system"}</span>{" "}
-                    <span>{a.action}</span>
+                    <span className="font-medium text-foreground">{a.actor?.name ?? a.actor?.role ?? "system"}</span>{" "}
+                    <code className="rounded bg-muted px-1 py-0.5 text-[10px]">{a.action}</code>
                   </span>
                   <time>{new Date(a.createdAt).toLocaleString()}</time>
                 </li>
@@ -281,40 +311,51 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
           </Card>
 
           <Card>
-            <CardTitle>Parties</CardTitle>
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-accent" />
+              <CardTitle>Parties</CardTitle>
+            </div>
             <ul className="mt-3 space-y-2 text-sm">
-              <li>
-                <strong>Client:</strong> {project.clientContact.name ?? project.clientContact.email}
-              </li>
-              <li>
-                <strong>Designer:</strong> {project.designer.name ?? project.designer.email}
-              </li>
+              <PartyRow role="Client" name={project.clientContact.name ?? project.clientContact.email} sub={project.clientContact.email} accent="client" />
+              <PartyRow role="Designer" name={project.designer.name ?? project.designer.email} sub={project.designer.email} accent="designer" />
               {project.manager ? (
-                <li>
-                  <strong>Manager:</strong> {project.manager.name ?? project.manager.email}
-                </li>
+                <PartyRow role="Manager" name={project.manager.name ?? project.manager.email} sub={project.manager.email} accent="manager" />
               ) : null}
             </ul>
             {project.mode === "COLLAB" ? (
-              <p className="mt-3 text-xs text-muted-foreground">
-                Split: Designer {(project.designerBps / 100).toFixed(0)}% / Manager{" "}
-                {(project.managerBps / 100).toFixed(0)}%
-              </p>
+              <div className="mt-3 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+                <Sparkles className="mr-1 inline h-3 w-3 text-accent" />
+                Split: <strong className="text-foreground">Designer {(project.designerBps / 100).toFixed(0)}%</strong> / <strong className="text-foreground">Manager {(project.managerBps / 100).toFixed(0)}%</strong>
+              </div>
             ) : null}
           </Card>
 
           <Card>
-            <CardTitle>Client magic-link</CardTitle>
-            <CardSubtitle>Clients access this project via a private link — no signup required.</CardSubtitle>
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4 text-accent" />
+              <CardTitle>Client magic-link</CardTitle>
+            </div>
+            <CardSubtitle className="mt-1">No signup. The client lands straight on the project.</CardSubtitle>
             <div className="mt-3 space-y-2 text-sm">
               {magicLink ? (
-                <div className="break-all rounded-md border border-border bg-muted/30 p-2 text-xs">{magicLink}</div>
+                <div className="flex items-start gap-2 rounded-lg border border-accent/20 bg-accent/5 p-2">
+                  <code className="flex-1 break-all text-xs text-foreground">{magicLink}</code>
+                  <button
+                    type="button"
+                    onClick={() => navigator.clipboard.writeText(magicLink)}
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-border bg-card text-muted-foreground hover:text-foreground"
+                    title="Copy"
+                  >
+                    <Copy className="h-3 w-3" />
+                  </button>
+                </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  We emailed the link to <strong>{project.clientContact.email}</strong>. Re-issue if it was lost.
+                  We emailed the link to <strong>{project.clientContact.email}</strong>. The dev server prints it to stdout too.
                 </p>
               )}
-              <Button size="sm" variant="outline" loading={busy === "magic"} onClick={reissueMagicLink}>
+              <Button size="sm" variant="outline" className="w-full" loading={busy === "magic"} onClick={reissueMagicLink}>
+                <Clipboard className="h-3.5 w-3.5" />
                 {magicLink ? "Issue another link" : "Re-issue magic link"}
               </Button>
             </div>
@@ -338,18 +379,84 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
 
 function Step({ done, active, label, action }: { done: boolean; active: boolean; label: string; action: React.ReactNode }) {
   return (
-    <li className="flex items-center justify-between gap-3 rounded-lg border border-border p-3">
+    <li
+      className={`flex items-center justify-between gap-3 rounded-lg border p-3 transition-colors ${
+        active
+          ? "border-accent/40 bg-accent/5"
+          : done
+            ? "border-success/30 bg-success/5"
+            : "border-border"
+      }`}
+    >
       <div className="flex items-center gap-3">
         <span
-          className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${
-            done ? "bg-success text-white" : active ? "bg-accent text-white" : "bg-muted text-muted-foreground"
+          className={`flex h-7 w-7 items-center justify-center rounded-full text-xs ${
+            done
+              ? "bg-success text-white"
+              : active
+                ? "accent-gradient text-white"
+                : "bg-muted text-muted-foreground"
           }`}
         >
-          {done ? "✓" : active ? "●" : "○"}
+          {done ? <Check className="h-3.5 w-3.5" /> : <Circle className="h-2 w-2 fill-current" />}
         </span>
-        <span className="font-medium">{label}</span>
+        <span className={`text-sm ${done || active ? "font-medium" : "text-muted-foreground"}`}>{label}</span>
       </div>
       <div>{action}</div>
+    </li>
+  );
+}
+
+function MilestoneProgress({ milestones }: { milestones: ProjectDetail["milestones"] }) {
+  const total = milestones.reduce((s, m) => s + m.amountMinor, 0);
+  const released = milestones
+    .filter((m) => m.status === "APPROVED")
+    .reduce((s, m) => s + m.amountMinor, 0);
+  const pct = total === 0 ? 0 : Math.round((released / total) * 100);
+  return (
+    <div className="mt-4">
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span>Released</span>
+        <span>{pct}%</span>
+      </div>
+      <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full accent-gradient transition-[width] duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function PartyRow({
+  role,
+  name,
+  sub,
+  accent,
+}: {
+  role: string;
+  name: string;
+  sub: string;
+  accent: "client" | "designer" | "manager";
+}) {
+  const tone =
+    accent === "designer"
+      ? "accent-gradient text-white"
+      : accent === "manager"
+        ? "bg-warning/15 text-warning"
+        : "bg-success/15 text-success";
+  return (
+    <li className="flex items-center gap-3">
+      <span className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full text-xs font-medium ${tone}`}>
+        {name.slice(0, 1).toUpperCase()}
+      </span>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{name}</div>
+        <div className="truncate text-xs text-muted-foreground">
+          {role} {role !== name ? `· ${sub}` : null}
+        </div>
+      </div>
     </li>
   );
 }
@@ -391,15 +498,16 @@ function MilestoneRow({
   }
 
   return (
-    <div className="rounded-lg border border-border p-3">
-      <div className="flex items-center justify-between">
-        <div>
+    <div className="rounded-xl border border-border p-3 transition-colors hover:border-border-strong">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium">{m.title}</span>
             <Badge variant={statusVariant(m.status)}>{m.status}</Badge>
           </div>
-          <div className="text-xs text-muted-foreground">
-            {m.kind} · {(m.releaseBps / 100).toFixed(0)}% · {formatMoney(m.amountMinor, currency)}
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {m.kind} · {(m.releaseBps / 100).toFixed(0)}% ·{" "}
+            <span className="font-medium text-foreground">{formatMoney(m.amountMinor, currency)}</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -409,19 +517,24 @@ function MilestoneRow({
           {isDesigner && (m.status === "IN_PROGRESS" || m.status === "REJECTED") && m.deliverables.length > 0 && !disabled ? (
             <Button
               size="sm"
+              variant="accent"
               loading={busy === "submit"}
               onClick={() => go("submit", `/api/projects/${projectId}/milestones/${m.id}/submit`, {})}
             >
-              Submit for review
+              <Send className="h-3.5 w-3.5" />
+              Submit
             </Button>
           ) : null}
         </div>
       </div>
       {m.deliverables.length > 0 ? (
-        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+        <ul className="mt-3 space-y-1.5 border-t border-border pt-3 text-xs text-muted-foreground">
           {m.deliverables.map((d) => (
-            <li key={d.id}>
-              v{d.version} · {d.filename} · {(d.sizeBytes / 1024).toFixed(0)} KB · {new Date(d.createdAt).toLocaleString()}
+            <li key={d.id} className="flex items-center gap-2">
+              <span className="chip">v{d.version}</span>
+              <span className="truncate font-medium text-foreground">{d.filename}</span>
+              <span>{(d.sizeBytes / 1024).toFixed(0)} KB</span>
+              <span className="ml-auto">{new Date(d.createdAt).toLocaleString()}</span>
             </li>
           ))}
         </ul>
@@ -464,7 +577,8 @@ function DeliverableUploader({ projectId, milestoneId, onUploaded }: { projectId
     <>
       <input ref={ref} type="file" className="hidden" onChange={onFile} />
       <Button size="sm" variant="outline" loading={uploading} onClick={() => ref.current?.click()}>
-        Upload deliverable
+        <Upload className="h-3.5 w-3.5" />
+        Upload
       </Button>
     </>
   );
@@ -501,29 +615,61 @@ function ChatPanel({ projectId, initial }: { projectId: string; initial: Message
 
   return (
     <Card>
-      <CardTitle>Conversation</CardTitle>
-      <CardSubtitle>Hash-chained, immutable, retained for audit.</CardSubtitle>
-      <div className="mt-3 max-h-80 space-y-2 overflow-auto rounded-lg border border-border bg-muted/30 p-3 text-sm">
-        {messages.length === 0 ? <p className="text-muted-foreground">No messages yet.</p> : null}
-        {messages.map((m) => (
-          <div key={m.id} className="rounded-md bg-card p-2">
-            <div className="text-xs text-muted-foreground">
-              <strong>
-                {m.senderName}
-                {m.senderClient ? " (client)" : m.senderUser ? "" : ""}
-              </strong>{" "}
-              · {new Date(m.createdAt).toLocaleString()}
-            </div>
-            <div>{m.body}</div>
+      <div className="flex items-center gap-2">
+        <MessageSquare className="h-4 w-4 text-accent" />
+        <CardTitle>Conversation</CardTitle>
+      </div>
+      <CardSubtitle className="mt-1">Hash-chained, immutable, retained for audit.</CardSubtitle>
+      <div className="mt-3 max-h-80 space-y-2 overflow-auto rounded-xl border border-border bg-muted/30 p-3 text-sm pretty-scroll">
+        {messages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-6 text-center text-muted-foreground">
+            <MessageSquare className="mb-2 h-5 w-5" />
+            <span className="text-xs">No messages yet — start the conversation.</span>
           </div>
-        ))}
+        ) : null}
+        {messages.map((m) => {
+          const isClient = !!m.senderClient;
+          return (
+            <div key={m.id} className="flex items-start gap-2">
+              <span
+                className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full text-[10px] font-medium ${
+                  isClient ? "bg-success/15 text-success" : "accent-gradient text-white"
+                }`}
+                title={m.senderName}
+              >
+                {m.senderName.slice(0, 1).toUpperCase()}
+              </span>
+              <div className="min-w-0 flex-1 rounded-lg bg-card p-2 hairline">
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="font-medium text-foreground">{m.senderName}</span>
+                  {isClient ? <Badge variant="success">client</Badge> : null}
+                  <span className="ml-auto">{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                </div>
+                <div className="mt-1 whitespace-pre-wrap text-sm leading-relaxed">{m.body}</div>
+              </div>
+            </div>
+          );
+        })}
       </div>
       <div className="mt-3 flex items-end gap-2">
-        <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write a message…" />
-        <Button onClick={send} loading={sending}>
+        <Textarea
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Write a message…"
+          className="min-h-[60px]"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              void send();
+            }
+          }}
+        />
+        <Button onClick={send} loading={sending} variant="accent">
+          <Send className="h-4 w-4" />
           Send
         </Button>
       </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">Tip: ⌘/Ctrl + Enter to send</p>
     </Card>
   );
 }

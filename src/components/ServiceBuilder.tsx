@@ -3,9 +3,10 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Card, CardSubtitle, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
-import { Input, Textarea } from "@/components/ui/Input";
+import { Input, Textarea, Field, Label } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { formatMoney } from "@/lib/money";
+import { Check, FileText, Mail, Package, Plus, Sparkles, User, Users } from "lucide-react";
 
 type Pkg = {
   id: string;
@@ -96,89 +97,115 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       <div className="space-y-6">
         <Card>
-          <CardTitle>Mode</CardTitle>
-          <CardSubtitle>How will this project run?</CardSubtitle>
+          <SectionHeader step="1" icon={<Users className="h-4 w-4" />} title="Mode" subtitle="How will this project run?" />
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <ModeCard
               active={mode === "SOLO"}
+              icon={<User className="h-4 w-4" />}
               title="Solo"
-              body="You handle the client end-to-end. 100% of payment goes to you."
+              body="You handle the client end-to-end. 100% goes to you."
               onClick={() => setMode("SOLO")}
             />
             <ModeCard
               active={mode === "COLLAB"}
+              icon={<Users className="h-4 w-4" />}
               title="Collaboration"
-              body="A Client Manager brings the client. Revenue is auto-split."
+              body="A Client Manager brings the client. Revenue auto-splits."
               onClick={() => setMode("COLLAB")}
             />
           </div>
         </Card>
 
         <Card>
-          <CardTitle>Project</CardTitle>
-          <div className="mt-4 grid gap-3">
-            <Input placeholder="Project title (e.g. Acme Logo)" value={title} onChange={(e) => setTitle(e.target.value)} />
-            <Textarea placeholder="Brief / requirements (markdown welcome)" value={briefMd} onChange={(e) => setBriefMd(e.target.value)} />
+          <SectionHeader step="2" icon={<FileText className="h-4 w-4" />} title="Project" subtitle="Title and brief." />
+          <div className="mt-4 grid gap-4">
+            <Field>
+              <Label>Project title</Label>
+              <Input placeholder="e.g. Acme Logo redesign" value={title} onChange={(e) => setTitle(e.target.value)} />
+            </Field>
+            <Field>
+              <Label>Brief / requirements</Label>
+              <Textarea placeholder="Markdown welcome — colours, references, constraints…" value={briefMd} onChange={(e) => setBriefMd(e.target.value)} />
+            </Field>
           </div>
         </Card>
 
         <Card>
-          <CardTitle>Step 1 — Base package</CardTitle>
-          <CardSubtitle>Choose the package that fits this project. Pricing is locked once confirmed.</CardSubtitle>
+          <SectionHeader step="3" icon={<Package className="h-4 w-4" />} title="Base package" subtitle="Pricing locks once both sides approve." />
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            {packages.map((p) => (
-              <button
-                type="button"
-                key={p.id}
-                onClick={() => setPackageId(p.id)}
-                className={`text-left surface p-4 transition ${packageId === p.id ? "ring-2 ring-accent" : "hover:bg-muted/40"}`}
-              >
-                <div className="font-medium">{p.name}</div>
-                <div className="mt-1 text-sm text-muted-foreground">{p.description}</div>
-                <div className="mt-3 text-lg font-semibold">{formatMoney(p.priceMinor, p.currency)}</div>
-                <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
-                  <li>{p.concepts} concept{p.concepts > 1 ? "s" : ""}</li>
-                  <li>{p.revisions} revision{p.revisions !== 1 ? "s" : ""}</li>
-                  <li>Delivery in {p.deliveryDays} days</li>
-                  <li>Files: {p.includedFiles.join(", ")}</li>
-                </ul>
-              </button>
-            ))}
+            {packages.map((p) => {
+              const active = packageId === p.id;
+              return (
+                <button
+                  type="button"
+                  key={p.id}
+                  onClick={() => setPackageId(p.id)}
+                  className={`relative flex flex-col rounded-xl border p-4 text-left transition-all ${
+                    active
+                      ? "border-accent/40 bg-accent/5 shadow-[0_0_0_3px_rgba(99,102,241,0.10)]"
+                      : "border-border hover:border-border-strong hover:bg-muted/40"
+                  }`}
+                >
+                  {active ? (
+                    <span className="absolute right-3 top-3 flex h-5 w-5 items-center justify-center rounded-full accent-gradient text-white">
+                      <Check className="h-3 w-3" />
+                    </span>
+                  ) : null}
+                  <div className="text-sm font-semibold">{p.name}</div>
+                  <div className="mt-1 text-xs text-muted-foreground line-clamp-2">{p.description}</div>
+                  <div className="mt-3 text-xl font-semibold tracking-tight">{formatMoney(p.priceMinor, p.currency)}</div>
+                  <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                    <li className="flex items-center gap-1.5"><Check className="h-3 w-3 text-success" />{p.concepts} concept{p.concepts > 1 ? "s" : ""}</li>
+                    <li className="flex items-center gap-1.5"><Check className="h-3 w-3 text-success" />{p.revisions} revision{p.revisions !== 1 ? "s" : ""}</li>
+                    <li className="flex items-center gap-1.5"><Check className="h-3 w-3 text-success" />Delivery in {p.deliveryDays} days</li>
+                    <li className="flex items-center gap-1.5"><Check className="h-3 w-3 text-success" />Files: {p.includedFiles.join(", ")}</li>
+                  </ul>
+                </button>
+              );
+            })}
           </div>
         </Card>
 
         <Card>
-          <CardTitle>Step 2 — Add-ons</CardTitle>
-          <CardSubtitle>Optional extras. Total updates instantly.</CardSubtitle>
+          <SectionHeader step="4" icon={<Plus className="h-4 w-4" />} title="Add-ons" subtitle="Optional extras. Total updates live." />
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {addons.map((a) => {
               const on = selectedAddons.has(a.id);
               return (
                 <label
                   key={a.id}
-                  className={`surface flex cursor-pointer items-center justify-between p-3 ${on ? "ring-2 ring-accent" : ""}`}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-all ${
+                    on
+                      ? "border-accent/40 bg-accent/5"
+                      : "border-border hover:border-border-strong hover:bg-muted/40"
+                  }`}
                 >
-                  <div className="flex items-start gap-3">
-                    <input
-                      type="checkbox"
-                      checked={on}
-                      onChange={(e) => {
-                        const next = new Set(selectedAddons);
-                        if (e.target.checked) next.add(a.id);
-                        else next.delete(a.id);
-                        setSelectedAddons(next);
-                      }}
-                      className="mt-1"
-                    />
-                    <div>
-                      <div className="text-sm font-medium">{a.name}</div>
-                      <div className="text-xs text-muted-foreground">{a.description}</div>
-                    </div>
-                  </div>
-                  <div className="text-sm">+{formatMoney(a.priceMinor, a.currency)}</div>
+                  <span
+                    className={`mt-0.5 flex h-4 w-4 items-center justify-center rounded-md border ${
+                      on ? "accent-gradient border-transparent text-white" : "border-border-strong"
+                    }`}
+                  >
+                    {on ? <Check className="h-3 w-3" /> : null}
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="sr-only"
+                    checked={on}
+                    onChange={(e) => {
+                      const next = new Set(selectedAddons);
+                      if (e.target.checked) next.add(a.id);
+                      else next.delete(a.id);
+                      setSelectedAddons(next);
+                    }}
+                  />
+                  <span className="flex-1">
+                    <span className="block text-sm font-medium">{a.name}</span>
+                    <span className="block text-xs text-muted-foreground">{a.description}</span>
+                  </span>
+                  <span className="text-sm font-medium">+{formatMoney(a.priceMinor, a.currency)}</span>
                 </label>
               );
             })}
@@ -186,17 +213,21 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
         </Card>
 
         <Card>
-          <CardTitle>Step 3 — Parties</CardTitle>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <Input placeholder="Client email *" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
-            <Input placeholder="Client name (optional)" value={clientName} onChange={(e) => setClientName(e.target.value)} />
+          <SectionHeader step="5" icon={<Mail className="h-4 w-4" />} title="Parties" subtitle="Client gets a magic-link — no signup." />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field>
+              <Label>Client email *</Label>
+              <Input type="email" placeholder="client@brand.com" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
+            </Field>
+            <Field>
+              <Label>Client name (optional)</Label>
+              <Input placeholder="Carla Chen" value={clientName} onChange={(e) => setClientName(e.target.value)} />
+            </Field>
             {mode === "COLLAB" ? (
-              <Input
-                placeholder="Client Manager email *"
-                value={managerEmail}
-                onChange={(e) => setManagerEmail(e.target.value)}
-                className="sm:col-span-2"
-              />
+              <Field className="sm:col-span-2">
+                <Label>Client Manager email *</Label>
+                <Input type="email" placeholder="manager@example.com" value={managerEmail} onChange={(e) => setManagerEmail(e.target.value)} />
+              </Field>
             ) : null}
           </div>
         </Card>
@@ -204,7 +235,10 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
 
       <aside className="lg:sticky lg:top-8 lg:self-start">
         <Card>
-          <CardTitle>Order summary</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle>Order summary</CardTitle>
+            <Badge variant={mode === "COLLAB" ? "accent" : "muted"}>{mode}</Badge>
+          </div>
           <div className="mt-4 space-y-2 text-sm">
             <Row label={pkg?.name ?? "—"} value={pkg ? formatMoney(pkg.priceMinor, pkg.currency) : "—"} />
             {addons
@@ -216,18 +250,25 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
             <Row label="Subtotal" value={formatMoney(subtotalMinor, currency)} />
             <Row label={`Tax (${(taxBps / 100).toFixed(0)}%)`} value={formatMoney(taxMinor, currency)} />
             <Divider />
-            <Row label={<strong>Total</strong>} value={<strong>{formatMoney(totalMinor, currency)}</strong>} />
+            <div className="flex items-center justify-between text-base">
+              <span className="font-semibold">Total</span>
+              <span className="font-semibold tracking-tight">{formatMoney(totalMinor, currency)}</span>
+            </div>
           </div>
-          <div className="mt-4 text-xs text-muted-foreground">
-            <Badge variant={mode === "COLLAB" ? "accent" : "muted"} className="mr-2">{mode}</Badge>
-            {mode === "COLLAB" ? "Designer 60% / Manager 40% (default)" : "100% to you"}
+          <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
+            <Sparkles className="mr-1 inline h-3 w-3 text-accent" />
+            {mode === "COLLAB" ? "Designer 60% / Manager 40% (editable on project page)" : "100% goes to you — no manager party"}
           </div>
-          {error ? <p className="mt-3 text-sm text-danger">{error}</p> : null}
+          {error ? (
+            <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {error}
+            </div>
+          ) : null}
           <Button className="mt-5 w-full" variant="accent" size="lg" onClick={submit} loading={submitting}>
             Create project
           </Button>
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            Pricing locks when the client confirms — no hidden changes.
+            Both sides approve — then pricing locks. The client gets a magic-link by email.
           </p>
         </Card>
       </aside>
@@ -235,16 +276,57 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
   );
 }
 
-function ModeCard({ active, title, body, onClick }: { active: boolean; title: string; body: string; onClick: () => void }) {
+function ModeCard({ active, title, body, icon, onClick }: { active: boolean; title: string; body: string; icon: React.ReactNode; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`surface p-4 text-left transition ${active ? "ring-2 ring-accent" : "hover:bg-muted/40"}`}
+      className={`flex flex-col rounded-xl border p-4 text-left transition-all ${
+        active
+          ? "border-accent/40 bg-accent/5 shadow-[0_0_0_3px_rgba(99,102,241,0.10)]"
+          : "border-border hover:border-border-strong hover:bg-muted/40"
+      }`}
     >
-      <div className="font-medium">{title}</div>
-      <div className="mt-1 text-sm text-muted-foreground">{body}</div>
+      <div className="flex items-center justify-between">
+        <span
+          className={`flex h-8 w-8 items-center justify-center rounded-md ${
+            active ? "accent-gradient text-white" : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {icon}
+        </span>
+        {active ? <Check className="h-4 w-4 text-accent" /> : null}
+      </div>
+      <div className="mt-3 text-sm font-medium">{title}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{body}</div>
     </button>
+  );
+}
+
+function SectionHeader({
+  step,
+  icon,
+  title,
+  subtitle,
+}: {
+  step: string;
+  icon: React.ReactNode;
+  title: string;
+  subtitle?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-accent/10 text-xs font-semibold text-accent">
+        {step}
+      </div>
+      <div className="flex-1">
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          <CardTitle>{title}</CardTitle>
+        </div>
+        {subtitle ? <CardSubtitle className="mt-0.5">{subtitle}</CardSubtitle> : null}
+      </div>
+    </div>
   );
 }
 
