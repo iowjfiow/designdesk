@@ -50,6 +50,31 @@
   }
 }
 
+/* Force dark dashboard theme regardless of system preference. Dashboards
+   are dense, data-rich; the design reference is dark-only. */
+.theme-dashboard {
+  --background: 8 8 12;
+  --foreground: 240 240 245;
+  --card: 18 18 24;
+  --card-elevated: 24 24 32;
+  --border: 38 38 46;
+  --border-strong: 60 60 70;
+  --muted: 24 24 30;
+  --muted-foreground: 148 148 160;
+  --primary: 240 240 245;
+  --primary-foreground: 18 18 24;
+  --accent: 129 140 248;
+  --accent-2: 167 139 250;
+  --accent-foreground: 18 18 24;
+  --success: 34 197 94;
+  --warning: 245 158 11;
+  --danger: 239 68 68;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px -2px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 18px 36px -10px rgba(0, 0, 0, 0.65);
+  color-scheme: dark;
+}
+
 * {
   border-color: rgb(var(--border));
 }

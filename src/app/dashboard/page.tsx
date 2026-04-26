@@ -1,15 +1,36 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { Card, CardSubtitle, CardTitle } from "@/components/ui/Card";
+import { Card } from "@/components/ui/Card";
 import { StatusPill } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { formatMoney } from "@/lib/money";
-import { ArrowRight, ArrowUpRight, Briefcase, Inbox, Plus, Wallet, Clock, Sparkles, Star, Hand } from "lucide-react";
+import {
+  ArrowRight,
+  Briefcase,
+  CheckCircle2,
+  Clock,
+  DollarSign,
+  Inbox,
+  MoreHorizontal,
+  Plus,
+  Sparkles,
+  Star,
+  TrendingUp,
+} from "lucide-react";
+
+const TONES = [
+  "from-indigo-500 to-violet-500",
+  "from-emerald-500 to-teal-500",
+  "from-amber-500 to-orange-500",
+  "from-pink-500 to-rose-500",
+  "from-sky-500 to-cyan-500",
+  "from-fuchsia-500 to-pink-500",
+];
 
 export default async function DashboardOverview() {
   const me = await requireUser();
-  const [projects, wallet, unread, inboxCount] = await Promise.all([
+  const [projects, wallet, inboxCount, completedCount, activity] = await Promise.all([
     prisma.project.findMany({
       where: { archivedAt: null, OR: [{ designerId: me.id }, { managerId: me.id }] },
       orderBy: { updatedAt: "desc" },
@@ -17,8 +38,16 @@ export default async function DashboardOverview() {
       include: { order: true, clientContact: true, milestones: true },
     }),
     prisma.walletEntry.findMany({ where: { userId: me.id } }),
-    prisma.notification.count({ where: { userId: me.id, readAt: null } }),
     prisma.project.count({ where: { status: "INCOMING" } }),
+    prisma.project.count({
+      where: { status: "COMPLETED", OR: [{ designerId: me.id }, { managerId: me.id }] },
+    }),
+    prisma.activityLog.findMany({
+      where: { project: { OR: [{ designerId: me.id }, { managerId: me.id }] } },
+      orderBy: { createdAt: "desc" },
+      take: 6,
+      include: { project: { select: { title: true, code: true } }, actor: { select: { name: true, email: true } } },
+    }),
   ]);
 
   const summary = wallet.reduce(
@@ -32,190 +61,233 @@ export default async function DashboardOverview() {
   );
 
   const activeCount = projects.filter((p) => !["COMPLETED", "CANCELLED"].includes(p.status)).length;
-  const firstName = me.name?.split(" ")[0] ?? me.email.split("@")[0];
 
   return (
-    <div className="space-y-10">
-      {/* HERO */}
-      <section className="relative overflow-hidden rounded-3xl border border-border bg-mesh px-7 py-9 sm:px-10 sm:py-12">
-        <div className="pointer-events-none absolute -right-32 -top-24 h-72 w-72 rounded-full accent-gradient opacity-25 blur-3xl" />
-        <div className="pointer-events-none absolute -left-24 -bottom-24 h-64 w-64 rounded-full bg-pink-400/30 opacity-30 blur-3xl" />
-        <div className="relative flex flex-wrap items-end justify-between gap-6">
-          <div>
-            <div className="chip chip-accent">
-              <Sparkles className="h-3 w-3" /> {me.role.replaceAll("_", " ")}
+    <div className="space-y-6">
+      {/* Quick actions */}
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {inboxCount > 0 ? (
+          <Link href="/dashboard/inbox">
+            <Button variant="outline">
+              <Inbox className="h-4 w-4" />
+              Inbox
+              <span className="ml-1 rounded-full bg-accent/20 px-1.5 py-0.5 text-[10px] font-semibold text-accent">{inboxCount}</span>
+            </Button>
+          </Link>
+        ) : null}
+        <Link href="/dashboard/projects/new">
+          <Button variant="accent">
+            <Plus className="h-4 w-4" /> New Project
+          </Button>
+        </Link>
+      </div>
+
+      {/* Stats row — 4 tinted-icon cards */}
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard
+          title="Total Projects"
+          value={String(projects.length + completedCount)}
+          delta={`${activeCount} active`}
+          icon={<Briefcase className="h-5 w-5" />}
+          tone="indigo"
+          trend="up"
+        />
+        <StatCard
+          title="Active Projects"
+          value={String(activeCount)}
+          delta={`${inboxCount} new in inbox`}
+          icon={<Clock className="h-5 w-5" />}
+          tone="amber"
+          trend="up"
+        />
+        <StatCard
+          title="Completed"
+          value={String(completedCount)}
+          delta="Lifetime"
+          icon={<CheckCircle2 className="h-5 w-5" />}
+          tone="emerald"
+          trend="up"
+        />
+        <StatCard
+          title="Earnings"
+          value={formatMoney(summary.available + summary.pending, "INR")}
+          delta={`${formatMoney(summary.locked, "INR")} in escrow`}
+          icon={<DollarSign className="h-5 w-5" />}
+          tone="sky"
+          trend="up"
+        />
+      </div>
+
+      {/* Two-column: projects card + activity card */}
+      <div className="grid gap-5 xl:grid-cols-[1.6fr_1fr]">
+        <Card className="p-0 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+            <div>
+              <div className="text-base font-semibold tracking-tight">Recent Projects</div>
+              <div className="text-xs text-muted-foreground">Your latest active projects</div>
             </div>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-              Hey, <span className="gradient-text">{firstName}</span>.
-            </h1>
-            <p className="mt-2 max-w-xl text-sm text-muted-foreground sm:text-base">
-              {activeCount > 0
-                ? `${activeCount} active project${activeCount === 1 ? "" : "s"} in motion${
-                    inboxCount > 0 ? ` and ${inboxCount} new order${inboxCount === 1 ? "" : "s"} waiting in your inbox.` : "."
-                  }`
-                : inboxCount > 0
-                  ? `${inboxCount} new order${inboxCount === 1 ? "" : "s"} waiting in your inbox.`
-                  : "Nothing on the burner. Build a structured quote in about a minute."}
-              {unread > 0 ? (
-                <> · <span className="text-warning">{unread} unread alert{unread === 1 ? "" : "s"}</span></>
-              ) : null}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {inboxCount > 0 ? (
-              <Link href="/dashboard/inbox">
-                <Button variant="outline" size="lg" className="bg-card/70 backdrop-blur-sm">
-                  <Inbox className="h-4 w-4" />
-                  Inbox <span className="ml-1 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-semibold text-accent">{inboxCount}</span>
-                </Button>
-              </Link>
-            ) : null}
-            <Link href="/dashboard/projects/new">
-              <Button variant="accent" size="lg" className="shadow-lg shadow-indigo-500/30">
-                <Plus className="h-4 w-4" /> New project
-              </Button>
+            <Link href="/dashboard/projects" className="inline-flex items-center gap-1 text-xs font-medium text-accent hover:underline">
+              View All <ArrowRight className="h-3 w-3" />
             </Link>
           </div>
-        </div>
-
-        {/* Stat strip */}
-        <div className="relative mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <HeroStat
-            icon={<Wallet className="h-4 w-4" />}
-            label="Available"
-            value={formatMoney(summary.available, "INR")}
-            hint="Ready to withdraw"
-            tone="success"
-          />
-          <HeroStat
-            icon={<Clock className="h-4 w-4" />}
-            label="In escrow"
-            value={formatMoney(summary.locked, "INR")}
-            hint="Locked until approved"
-            tone="accent"
-          />
-          <HeroStat
-            icon={<Star className="h-4 w-4" />}
-            label="Pending"
-            value={formatMoney(summary.pending, "INR")}
-            hint="Approved, settling"
-          />
-          <HeroStat
-            icon={<Briefcase className="h-4 w-4" />}
-            label="Active"
-            value={String(activeCount)}
-            hint={`${projects.length} total in view`}
-          />
-        </div>
-      </section>
-
-      {/* RECENT */}
-      <section>
-        <div className="mb-4 flex items-center justify-between">
-          <div>
-            <div className="eyebrow">Activity</div>
-            <h2 className="mt-1 text-xl font-semibold tracking-tight">Recent projects</h2>
-          </div>
-          <Link className="inline-flex items-center gap-1 text-sm text-accent hover:underline" href="/dashboard/projects">
-            View all <ArrowRight className="h-3 w-3" />
-          </Link>
-        </div>
-        {projects.length === 0 ? (
-          <Card className="bg-mesh">
-            <div className="flex flex-col items-center justify-center py-12 text-center">
-              <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl accent-gradient text-white shadow-lg shadow-indigo-500/30">
-                <Briefcase className="h-6 w-6" />
+          {projects.length === 0 ? (
+            <div className="flex flex-col items-center justify-center px-5 py-14 text-center">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl accent-gradient text-white shadow-md shadow-indigo-500/30">
+                <Briefcase className="h-5 w-5" />
               </div>
-              <CardTitle>Spin up your first project</CardTitle>
-              <CardSubtitle className="mt-1 max-w-sm">
-                Build a structured quote in under a minute. Pick a base package, add formats and extras,
-                lock the scope, get paid.
-              </CardSubtitle>
-              <div className="mt-5 flex flex-wrap justify-center gap-2">
-                <Link href="/dashboard/projects/new">
-                  <Button variant="accent">
-                    <Plus className="h-4 w-4" /> Create project
-                  </Button>
-                </Link>
-                <Link href="/dashboard/inbox">
-                  <Button variant="outline">
-                    <Hand className="h-4 w-4" /> Claim from inbox
-                  </Button>
-                </Link>
+              <div className="text-base font-semibold">No projects yet</div>
+              <div className="mt-1 max-w-sm text-sm text-muted-foreground">
+                Build a structured quote in under a minute. Pick a base package, add formats and extras, get paid.
               </div>
+              <Link href="/dashboard/projects/new" className="mt-4">
+                <Button variant="accent">
+                  <Sparkles className="h-4 w-4" /> Create project
+                </Button>
+              </Link>
             </div>
-          </Card>
-        ) : (
-          <Card className="p-0 overflow-hidden">
+          ) : (
             <div className="divide-y divide-border">
               {projects.map((p) => {
                 const total = p.milestones.reduce((s, m) => s + m.amountMinor, 0);
                 const released = p.milestones.filter((m) => m.status === "APPROVED").reduce((s, m) => s + m.amountMinor, 0);
                 const pct = total === 0 ? 0 : Math.round((released / total) * 100);
                 const initial = (p.title || p.code).slice(0, 1).toUpperCase();
-                const tones = ["from-indigo-500 to-violet-500", "from-emerald-500 to-teal-500", "from-amber-500 to-orange-500", "from-pink-500 to-rose-500", "from-sky-500 to-cyan-500", "from-fuchsia-500 to-pink-500"];
-                const tone = tones[(p.code.charCodeAt(p.code.length - 1) ?? 0) % tones.length];
+                const tone = TONES[(p.code.charCodeAt(p.code.length - 1) ?? 0) % TONES.length];
                 return (
                   <Link
                     key={p.id}
                     href={`/dashboard/projects/${p.id}`}
-                    className="group grid grid-cols-[44px_1fr_180px_120px_110px_24px] items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/30"
+                    className="flex items-center gap-4 px-5 py-4 transition-colors hover:bg-muted/30"
                   >
-                    <span className={`flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${tone} text-base font-semibold text-white shadow-md`}>
+                    <span className={`flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-gradient-to-br ${tone} text-base font-semibold text-white shadow-md`}>
                       {initial}
                     </span>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-semibold">{p.title}</div>
                       <div className="truncate text-xs text-muted-foreground">
                         {p.clientContact?.company ?? p.clientContact?.name ?? p.clientContact?.email ?? "—"}
                       </div>
                     </div>
-                    <div className="hidden lg:block">
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
-                        <div className={`h-full rounded-full bg-gradient-to-r ${tone} transition-[width]`} style={{ width: `${pct}%` }} />
+                    <div className="hidden w-40 md:block">
+                      <div className="flex items-center gap-2">
+                        <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div className={`h-full rounded-full bg-gradient-to-r ${tone}`} style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span>
                       </div>
                     </div>
-                    <div className="hidden text-xs text-muted-foreground tabular-nums lg:block">{pct}% · {p.order ? formatMoney(p.order.totalMinor, p.order.currency) : "—"}</div>
                     <StatusPill status={p.status} />
-                    <ArrowUpRight className="hidden h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5 group-hover:text-accent sm:block" />
+                    <span className="hidden text-right text-xs font-medium tabular-nums text-foreground/80 lg:block">
+                      {p.order ? formatMoney(p.order.totalMinor, p.order.currency) : "—"}
+                    </span>
+                    <MoreHorizontal className="h-4 w-4 text-muted-foreground" />
                   </Link>
                 );
               })}
             </div>
-          </Card>
-        )}
-      </section>
+          )}
+        </Card>
+
+        <Card className="p-0 overflow-hidden">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+            <div>
+              <div className="text-base font-semibold tracking-tight">Recent Activity</div>
+              <div className="text-xs text-muted-foreground">Latest events on your projects</div>
+            </div>
+          </div>
+          {activity.length === 0 ? (
+            <div className="px-5 py-10 text-center text-sm text-muted-foreground">No activity yet.</div>
+          ) : (
+            <ul className="divide-y divide-border">
+              {activity.map((a) => {
+                const tone = activityTone(a.action);
+                return (
+                  <li key={a.id} className="flex items-start gap-3 px-5 py-3.5">
+                    <span className={`mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-full ${tone.bg} ${tone.fg}`}>
+                      {tone.icon}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{prettyAction(a.action)}</div>
+                      <div className="truncate text-xs text-muted-foreground">
+                        {a.project?.title ?? a.project?.code ?? "—"}
+                        {a.actor?.name ? ` · ${a.actor.name}` : ""}
+                      </div>
+                    </div>
+                    <span className="text-[11px] text-muted-foreground">{relTime(a.createdAt)}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Card>
+      </div>
     </div>
   );
 }
 
-function HeroStat({
-  icon,
-  label,
+function StatCard({
+  title,
   value,
-  hint,
+  delta,
+  icon,
   tone,
+  trend = "up",
 }: {
-  icon: React.ReactNode;
-  label: string;
+  title: string;
   value: string;
-  hint?: string;
-  tone?: "accent" | "success";
+  delta?: string;
+  icon: React.ReactNode;
+  tone: "indigo" | "emerald" | "amber" | "sky";
+  trend?: "up" | "flat";
 }) {
-  const ringTone =
-    tone === "success"
-      ? "border-success/30 bg-success/10 text-success"
-      : tone === "accent"
-        ? "border-accent/30 bg-accent/10 text-accent"
-        : "border-border bg-muted/50 text-muted-foreground";
+  const tones = {
+    indigo: "bg-indigo-500/15 text-indigo-300",
+    emerald: "bg-emerald-500/15 text-emerald-300",
+    amber: "bg-amber-500/15 text-amber-300",
+    sky: "bg-sky-500/15 text-sky-300",
+  } as const;
   return (
-    <div className="rounded-2xl border border-border bg-card/80 p-4 backdrop-blur-sm">
-      <div className="flex items-center gap-2">
-        <span className={`flex h-8 w-8 items-center justify-center rounded-lg border ${ringTone}`}>{icon}</span>
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</span>
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <div className="flex items-start justify-between">
+        <div className={`flex h-11 w-11 items-center justify-center rounded-xl ${tones[tone]}`}>{icon}</div>
+        {trend === "up" ? (
+          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-400">
+            <TrendingUp className="h-3 w-3" />
+            +
+          </span>
+        ) : null}
       </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
-      {hint ? <div className="mt-0.5 text-[11px] text-muted-foreground">{hint}</div> : null}
+      <div className="mt-5 text-2xl font-semibold tracking-tight">{value}</div>
+      <div className="mt-0.5 text-xs text-muted-foreground">{title}</div>
+      {delta ? <div className="mt-2 text-[11px] text-muted-foreground">{delta}</div> : null}
     </div>
   );
+}
+
+function activityTone(action: string): { bg: string; fg: string; icon: React.ReactNode } {
+  if (action.includes("approve") || action.includes("complete") || action.includes("release"))
+    return { bg: "bg-emerald-500/15", fg: "text-emerald-300", icon: <CheckCircle2 className="h-4 w-4" /> };
+  if (action.includes("dispute") || action.includes("reject"))
+    return { bg: "bg-rose-500/15", fg: "text-rose-300", icon: <Star className="h-4 w-4" /> };
+  if (action.includes("pay") || action.includes("payment") || action.includes("escrow"))
+    return { bg: "bg-amber-500/15", fg: "text-amber-300", icon: <DollarSign className="h-4 w-4" /> };
+  return { bg: "bg-indigo-500/15", fg: "text-indigo-300", icon: <Sparkles className="h-4 w-4" /> };
+}
+
+function prettyAction(action: string) {
+  return action
+    .replace(/[._]/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function relTime(date: Date) {
+  const diff = Date.now() - new Date(date).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
 }

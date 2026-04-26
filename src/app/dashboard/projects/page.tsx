@@ -64,11 +64,7 @@ export default async function ProjectsPage({ searchParams }: { searchParams: Pro
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Projects</h1>
-          <p className="text-sm text-muted-foreground">Manage every project in one place.</p>
-        </div>
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Link href="/dashboard/projects/new">
           <Button variant="accent">
             <Plus className="h-4 w-4" /> New Project
