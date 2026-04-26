@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/Button";
 import { Input, Textarea, Field, Label } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { formatMoney } from "@/lib/money";
-import { Check, FileText, Mail, Package, Plus, Sparkles, User, Users } from "lucide-react";
+import { Check, Copy, FileText, KeyRound, Mail, Package, Plus, Sparkles, User, Users } from "lucide-react";
 
 type Pkg = {
   id: string;
@@ -29,11 +29,24 @@ type Addon = {
   currency: string;
 };
 
-export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB" }) {
+type Role = "DESIGNER" | "CLIENT_MANAGER" | "ADMIN" | "CLIENT";
+
+export function ServiceBuilder({
+  defaultMode,
+  myRole,
+  myEmail,
+}: {
+  defaultMode: "SOLO" | "COLLAB";
+  myRole: Role;
+  myEmail: string;
+}) {
   const router = useRouter();
+  const isManager = myRole === "CLIENT_MANAGER";
+  const counterpartyLabel = isManager ? "Designer email" : "Client Manager email";
+  const counterpartyPlaceholder = isManager ? "designer@example.com" : "manager@example.com";
   const [packages, setPackages] = useState<Pkg[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
-  const [mode, setMode] = useState<"SOLO" | "COLLAB">(defaultMode);
+  const [mode, setMode] = useState<"SOLO" | "COLLAB">(isManager ? "COLLAB" : defaultMode);
   const [packageId, setPackageId] = useState<string | null>(null);
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [title, setTitle] = useState("");
@@ -41,9 +54,10 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
   const [clientEmail, setClientEmail] = useState("");
   const [clientName, setClientName] = useState("");
   const [managerEmail, setManagerEmail] = useState("");
-  const [taxBps] = useState(1800); // GST 18% default; could be made editable
+  const [taxBps] = useState(1800);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [success, setSuccess] = useState<{ projectId: string; magicLink: string | null } | null>(null);
 
   useEffect(() => {
     void Promise.all([
@@ -67,8 +81,17 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
   async function submit() {
     setError(null);
     if (!pkg) return setError("Select a package");
+    if (!title.trim()) return setError("Project title is required");
     if (!clientEmail) return setError("Client email is required");
-    if (mode === "COLLAB" && !managerEmail) return setError("Manager email is required for collab mode");
+    if (mode === "COLLAB" && !managerEmail) {
+      return setError(`${counterpartyLabel} is required for collaboration mode`);
+    }
+    if (mode === "COLLAB" && managerEmail.toLowerCase() === myEmail.toLowerCase()) {
+      return setError(`${counterpartyLabel} must be a different person from you`);
+    }
+    if (mode === "COLLAB" && managerEmail.toLowerCase() === clientEmail.toLowerCase()) {
+      return setError("Client and counterparty must use different emails");
+    }
     setSubmitting(true);
     try {
       const res = await fetch("/api/projects", {
@@ -88,7 +111,8 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed to create project");
-      router.push(`/dashboard/projects/${json.project.id}`);
+      setSuccess({ projectId: json.project.id, magicLink: json.magicLink ?? null });
+      router.refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
@@ -96,18 +120,23 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
     }
   }
 
+  if (success) {
+    return <PostCreate projectId={success.projectId} magicLink={success.magicLink} />;
+  }
+
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       <div className="space-y-6">
         <Card>
-          <SectionHeader step="1" icon={<Users className="h-4 w-4" />} title="Mode" subtitle="How will this project run?" />
+          <SectionHeader step="1" icon={<Users className="h-4 w-4" />} title="Mode" subtitle={isManager ? "Managers always run in collab mode." : "How will this project run?"} />
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <ModeCard
               active={mode === "SOLO"}
               icon={<User className="h-4 w-4" />}
               title="Solo"
               body="You handle the client end-to-end. 100% goes to you."
-              onClick={() => setMode("SOLO")}
+              onClick={() => !isManager && setMode("SOLO")}
+              disabled={isManager}
             />
             <ModeCard
               active={mode === "COLLAB"}
@@ -225,8 +254,13 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
             </Field>
             {mode === "COLLAB" ? (
               <Field className="sm:col-span-2">
-                <Label>Client Manager email *</Label>
-                <Input type="email" placeholder="manager@example.com" value={managerEmail} onChange={(e) => setManagerEmail(e.target.value)} />
+                <Label>{counterpartyLabel} *</Label>
+                <Input type="email" placeholder={counterpartyPlaceholder} value={managerEmail} onChange={(e) => setManagerEmail(e.target.value)} />
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {isManager
+                    ? "The designer who will execute the work. They must already have a DesignDesk account."
+                    : "The client manager who brings the client. They must already have a DesignDesk account."}
+                </p>
               </Field>
             ) : null}
           </div>
@@ -276,15 +310,32 @@ export function ServiceBuilder({ defaultMode }: { defaultMode: "SOLO" | "COLLAB"
   );
 }
 
-function ModeCard({ active, title, body, icon, onClick }: { active: boolean; title: string; body: string; icon: React.ReactNode; onClick: () => void }) {
+function ModeCard({
+  active,
+  title,
+  body,
+  icon,
+  onClick,
+  disabled,
+}: {
+  active: boolean;
+  title: string;
+  body: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={`flex flex-col rounded-xl border p-4 text-left transition-all ${
         active
           ? "border-accent/40 bg-accent/5 shadow-[0_0_0_3px_rgba(99,102,241,0.10)]"
-          : "border-border hover:border-border-strong hover:bg-muted/40"
+          : disabled
+            ? "cursor-not-allowed border-border opacity-50"
+            : "border-border hover:border-border-strong hover:bg-muted/40"
       }`}
     >
       <div className="flex items-center justify-between">
@@ -340,4 +391,62 @@ function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode 
 }
 function Divider() {
   return <div className="my-1 h-px w-full bg-border" />;
+}
+
+function PostCreate({ projectId, magicLink }: { projectId: string; magicLink: string | null }) {
+  const router = useRouter();
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="mx-auto max-w-2xl">
+      <Card>
+        <div className="flex flex-col items-center gap-3 py-3 text-center">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/15 text-success">
+            <Check className="h-5 w-5" />
+          </span>
+          <CardTitle>Project created</CardTitle>
+          <CardSubtitle className="max-w-md">
+            Both sides need to approve the scope to lock pricing and generate milestones.
+          </CardSubtitle>
+        </div>
+        {magicLink ? (
+          <div className="mt-4 space-y-2 rounded-xl border border-accent/20 bg-accent/5 p-4">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <KeyRound className="h-4 w-4 text-accent" />
+              Client magic-link
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Send this to your client — no signup needed. They land directly on a polished portal where they can review the quote, chat, and pay.
+            </p>
+            <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2">
+              <code className="flex-1 break-all text-xs">{magicLink}</code>
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(magicLink);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1500);
+                }}
+                className="flex h-7 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs hover:bg-muted"
+              >
+                <Copy className="h-3 w-3" />
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+            We&apos;ve emailed the client a private link. You can re-issue it any time from the project page.
+          </p>
+        )}
+        <div className="mt-5 flex flex-wrap gap-2">
+          <Button variant="accent" onClick={() => router.push(`/dashboard/projects/${projectId}`)}>
+            Open project workspace
+          </Button>
+          <Button variant="outline" onClick={() => router.push("/dashboard/projects")}>
+            Back to projects
+          </Button>
+        </div>
+      </Card>
+    </div>
+  );
 }

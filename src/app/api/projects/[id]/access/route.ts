@@ -16,7 +16,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
     const { token } = await issueAccessToken({ projectId: id, role: "CLIENT", label: "client" });
     const origin = new URL(req.url).origin;
-    const base = process.env.APP_BASE_URL ?? origin;
+    const base = process.env.APP_BASE_URL || origin;
     const magicLink = `${base}${buildMagicLinkPath(token)}`;
     await logActivity({ actorId: me.id, projectId: id, action: "access.token_issued" });
     return ok({ magicLink });

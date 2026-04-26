@@ -1,7 +1,7 @@
 export const dynamic = "force-dynamic";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { requireUser, hashPassword } from "@/lib/auth";
+import { requireUser } from "@/lib/auth";
 import { CreateProjectSchema } from "@/lib/validators";
 import { ok, handleError, fail } from "@/lib/http";
 import { logActivity } from "@/lib/activity";
@@ -9,7 +9,6 @@ import { projectCode } from "@/lib/code";
 import { notifyMany } from "@/lib/notify";
 import { issueAccessToken, buildMagicLinkPath } from "@/lib/client-token";
 import { sendEmail } from "@/lib/email";
-import { randomBytes } from "node:crypto";
 
 export async function GET() {
   try {
@@ -35,6 +34,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
+    const reqOrigin = new URL(req.url).origin;
     const me = await requireUser();
 
     if (!["DESIGNER", "ADMIN", "CLIENT_MANAGER"].includes(me.role)) {
@@ -57,13 +57,27 @@ export async function POST(req: NextRequest) {
     if (me.role === "DESIGNER" || me.role === "ADMIN") {
       designerId = me.id;
       if (body.mode === "COLLAB" && body.managerEmail) {
-        const mgr = await upsertCollaborator(body.managerEmail, undefined, "CLIENT_MANAGER");
+        const mgr = await findCollaborator(body.managerEmail, "CLIENT_MANAGER");
+        if (!mgr) {
+          return fail(
+            400,
+            `No Client Manager with email ${body.managerEmail.toLowerCase()} exists. They must sign up first.`,
+          );
+        }
+        if (mgr.id === me.id) return fail(400, "Manager must be a different user");
         managerId = mgr.id;
       }
     } else {
       // CLIENT_MANAGER creating a project: managerEmail field carries the designer's email.
-      if (!body.managerEmail) return fail(400, "Specify the designer's email in managerEmail");
-      const designer = await upsertCollaborator(body.managerEmail, undefined, "DESIGNER");
+      if (!body.managerEmail) return fail(400, "Specify the designer's email");
+      const designer = await findCollaborator(body.managerEmail, "DESIGNER");
+      if (!designer) {
+        return fail(
+          400,
+          `No Designer with email ${body.managerEmail.toLowerCase()} exists. They must sign up first.`,
+        );
+      }
+      if (designer.id === me.id) return fail(400, "Designer must be a different user");
       designerId = designer.id;
       managerId = me.id;
     }
@@ -143,7 +157,7 @@ export async function POST(req: NextRequest) {
       role: "CLIENT",
       label: "client",
     });
-    const base = process.env.APP_BASE_URL ?? "http://localhost:3000";
+    const base = process.env.APP_BASE_URL || reqOrigin;
     const magicLink = `${base}${buildMagicLinkPath(token)}`;
     await sendEmail({
       to: clientContact.email,
@@ -183,22 +197,14 @@ async function upsertClientContact(email: string, name?: string) {
   });
 }
 
-async function upsertCollaborator(
+async function findCollaborator(
   email: string,
-  name: string | undefined,
-  role: "DESIGNER" | "CLIENT_MANAGER",
+  expected: "DESIGNER" | "CLIENT_MANAGER",
 ) {
   const lower = email.toLowerCase();
-  const existing = await prisma.user.findUnique({ where: { email: lower } });
-  if (existing) return existing;
-  // Invite-style placeholder account; the user will set a password via signup.
-  const tempPw = randomBytes(24).toString("hex");
-  return prisma.user.create({
-    data: {
-      email: lower,
-      name: name ?? null,
-      passwordHash: await hashPassword(tempPw),
-      role,
-    },
-  });
+  const u = await prisma.user.findUnique({ where: { email: lower } });
+  if (!u) return null;
+  // Allow ADMIN to act on either side; otherwise role must match expected.
+  if (u.role !== expected && u.role !== "ADMIN") return null;
+  return u;
 }
