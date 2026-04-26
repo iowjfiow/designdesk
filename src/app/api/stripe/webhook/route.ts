@@ -85,13 +85,18 @@ async function onIntentSucceeded(pi: Stripe.PaymentIntent) {
     });
     // Record the escrow hold on each beneficiary's wallet (state = locked)
     // so they can see what is in escrow for this project.
+    if (!project.designerId) {
+      // INCOMING projects shouldn't reach a paid state, but guard anyway.
+      return;
+    }
     const designerShare = Math.floor((payment.amountMinor * project.designerBps) / 10_000);
     const managerShare = project.managerId
       ? Math.floor((payment.amountMinor * project.managerBps) / 10_000)
       : 0;
+    const designerId = project.designerId;
     await prisma.walletEntry.create({
       data: {
-        userId: project.designerId,
+        userId: designerId,
         projectId: project.id,
         paymentId: payment.id,
         kind: "ESCROW_HOLD",
@@ -120,7 +125,7 @@ async function onIntentSucceeded(pi: Stripe.PaymentIntent) {
       action: "payment.captured",
       metadata: { paymentId: payment.id, intentId: pi.id, amount: payment.amountMinor },
     });
-    await notify(payment.order.project.designerId, {
+    await notify(designerId, {
       title: "Escrow funded",
       body: `Project ${payment.order.project.code}: client paid; you can accept the order.`,
       href: `/dashboard/projects/${payment.order.projectId}`,

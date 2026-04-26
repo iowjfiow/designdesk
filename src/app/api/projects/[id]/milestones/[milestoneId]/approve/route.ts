@@ -69,7 +69,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       action: "milestone.approved",
       metadata: { milestoneId, released, viewer: isClient ? "client" : "admin" },
     });
-    await notifyMany([project.designerId, ...(project.managerId ? [project.managerId] : [])], {
+    await notifyMany([project.designerId, project.managerId].filter((x): x is string => !!x), {
       title: `${milestone.title} approved`,
       body: `Funds released for project ${project.code}.`,
       href: `/dashboard/wallet`,

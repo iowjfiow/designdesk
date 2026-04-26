@@ -57,7 +57,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
       action: "milestone.rejected",
       metadata: { milestoneId, reason: body.reason, used: used + 1, allowed, viewer: isClient ? "client" : "admin" },
     });
-    await notify(project.designerId, {
+    if (project.designerId) await notify(project.designerId, {
       title: `Revision requested on ${milestone.title}`,
       body: `${project.code}: ${body.reason.slice(0, 200)}`,
       href: `/dashboard/projects/${id}`,

@@ -8,12 +8,19 @@ import { Textarea } from "@/components/ui/Input";
 import { formatMoney } from "@/lib/money";
 import {
   AlertTriangle,
+  Briefcase,
+  Building2,
+  Calendar,
   Check,
+  Globe,
+  Link2,
   Lock,
   MessageSquare,
+  Phone,
   Send,
   ShieldAlert,
   Sparkles,
+  Star,
   Wallet,
   X,
 } from "lucide-react";
@@ -31,11 +38,15 @@ type Project = {
   id: string;
   code: string;
   title: string;
+  briefMd: string | null;
   status: string;
   mode: "SOLO" | "COLLAB";
-  designer: { name: string | null; email: string };
+  deadline: string | null;
+  budgetMinor: number | null;
+  references: string[];
+  designer: { name: string | null; email: string } | null;
   manager: { name: string | null; email: string } | null;
-  clientContact: { name: string | null; email: string };
+  clientContact: { id: string; name: string | null; email: string; company: string | null; phone: string | null; website: string | null };
   order: {
     locked: boolean;
     lockedAt: string | null;
@@ -240,6 +251,12 @@ export function ClientPortal({ project }: { project: Project }) {
               </div>
             </Card>
 
+            {project.status === "COMPLETED" ? (
+              <FinalReviewCard projectId={project.id} />
+            ) : null}
+
+            <ClientProjectInfoCard project={project} />
+
             <Card>
               <div className="flex items-center gap-2">
                 <MessageSquare className="h-4 w-4 text-accent" />
@@ -254,7 +271,11 @@ export function ClientPortal({ project }: { project: Project }) {
             <Card>
               <CardTitle>Team</CardTitle>
               <ul className="mt-3 space-y-3">
-                <PartyRow role="Designer" name={project.designer.name ?? project.designer.email} sub={project.designer.email} tone="accent" />
+                {project.designer ? (
+                  <PartyRow role="Designer" name={project.designer.name ?? project.designer.email} sub={project.designer.email} tone="accent" />
+                ) : (
+                  <PartyRow role="Designer" name="Awaiting claim" sub="A designer will pick this up shortly" tone="accent" />
+                )}
                 {project.manager ? (
                   <PartyRow role="Client manager" name={project.manager.name ?? project.manager.email} sub={project.manager.email} tone="warning" />
                 ) : null}
@@ -395,6 +416,73 @@ function ClientMilestoneRow({
           </div>
         </div>
       ) : null}
+      {(m.status === "APPROVED" || m.status === "REJECTED") && !disabled ? (
+        <MilestoneFeedback projectId={projectId} milestoneId={m.id} />
+      ) : null}
+    </div>
+  );
+}
+
+function MilestoneFeedback({ projectId, milestoneId }: { projectId: string; milestoneId: string }) {
+  const [open, setOpen] = useState(false);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function submit() {
+    if (comment.trim().length < 1) return;
+    setSubmitting(true);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/reviews`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "MILESTONE", milestoneId, comment: comment.trim() }),
+      });
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}));
+        alert(j.error ?? "Failed");
+        return;
+      }
+      setDone(true);
+      setOpen(false);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <p className="mt-3 flex items-center gap-1.5 border-t border-border pt-3 text-xs text-success">
+        <Check className="h-3 w-3" /> Feedback sent — thanks!
+      </p>
+    );
+  }
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="mt-3 flex items-center gap-1.5 border-t border-border pt-3 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <MessageSquare className="h-3 w-3" /> Leave detailed feedback on this milestone
+      </button>
+    );
+  }
+  return (
+    <div className="mt-3 space-y-2 border-t border-border pt-3">
+      <Textarea
+        placeholder="Tell the designer what worked, what didn't, what to refine."
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+      />
+      <div className="flex gap-2">
+        <Button size="sm" variant="accent" loading={submitting} onClick={submit}>
+          Send feedback
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </Button>
+      </div>
     </div>
   );
 }
@@ -545,5 +633,187 @@ function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode 
       <span className="text-muted-foreground">{label}</span>
       <span className="font-medium tabular-nums">{value}</span>
     </div>
+  );
+}
+
+function ClientProjectInfoCard({ project }: { project: Project }) {
+  const c = project.clientContact;
+  const hasContact = c.company || c.phone || c.website;
+  const hasScope = project.deadline || project.budgetMinor || project.references.length > 0;
+  const hasBrief = project.briefMd && project.briefMd.trim().length > 0;
+  if (!hasContact && !hasScope && !hasBrief) return null;
+  const currency = project.order?.currency ?? "INR";
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <Briefcase className="h-4 w-4 text-accent" />
+        <CardTitle>Project info</CardTitle>
+      </div>
+      <CardSubtitle className="mt-1">What you shared when placing this order.</CardSubtitle>
+      <div className="mt-3 space-y-3 text-sm">
+        {hasBrief ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Brief</div>
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed">{project.briefMd}</p>
+          </div>
+        ) : null}
+        {hasContact ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contact</div>
+            <ul className="mt-1 space-y-1">
+              {c.company ? <ClientInfoRow icon={<Building2 className="h-3 w-3" />} value={c.company} /> : null}
+              {c.phone ? <ClientInfoRow icon={<Phone className="h-3 w-3" />} value={c.phone} /> : null}
+              {c.website ? (
+                <ClientInfoRow
+                  icon={<Globe className="h-3 w-3" />}
+                  value={
+                    <a className="text-accent hover:underline" href={c.website} target="_blank" rel="noreferrer">
+                      {c.website}
+                    </a>
+                  }
+                />
+              ) : null}
+            </ul>
+          </div>
+        ) : null}
+        {hasScope ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Scope</div>
+            <ul className="mt-1 space-y-1">
+              {project.deadline ? (
+                <ClientInfoRow icon={<Calendar className="h-3 w-3" />} value={`Deadline ${new Date(project.deadline).toLocaleDateString()}`} />
+              ) : null}
+              {project.budgetMinor ? (
+                <ClientInfoRow icon={<Wallet className="h-3 w-3" />} value={`Budget ${formatMoney(project.budgetMinor, currency)}`} />
+              ) : null}
+              {project.references.length > 0
+                ? project.references.map((r) => (
+                    <ClientInfoRow
+                      key={r}
+                      icon={<Link2 className="h-3 w-3" />}
+                      value={
+                        r.startsWith("http") ? (
+                          <a className="break-all text-accent hover:underline" href={r} target="_blank" rel="noreferrer">
+                            {r}
+                          </a>
+                        ) : (
+                          <span className="break-all">{r}</span>
+                        )
+                      }
+                    />
+                  ))
+                : null}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function ClientInfoRow({ icon, value }: { icon: React.ReactNode; value: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-2 text-xs">
+      <span className="mt-0.5 flex-shrink-0 text-muted-foreground">{icon}</span>
+      <span className="min-w-0 flex-1 text-foreground">{value}</span>
+    </li>
+  );
+}
+
+function FinalReviewCard({ projectId }: { projectId: string }) {
+  const [rating, setRating] = useState(0);
+  const [hover, setHover] = useState(0);
+  const [comment, setComment] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function submit() {
+    setError(null);
+    if (rating < 1) return setError("Pick a star rating from 1 to 5.");
+    if (comment.trim().length < 1) return setError("Please share a quick note about your experience.");
+    setSubmitting(true);
+    try {
+      const r = await fetch(`/api/projects/${projectId}/reviews`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "FINAL", rating, comment: comment.trim() }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error ?? "Failed to submit review");
+      setDone(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (done) {
+    return (
+      <Card>
+        <div className="flex items-center gap-2">
+          <span className="flex h-8 w-8 items-center justify-center rounded-full bg-success/15 text-success">
+            <Check className="h-4 w-4" />
+          </span>
+          <div>
+            <CardTitle>Thanks for your review!</CardTitle>
+            <CardSubtitle className="mt-0.5">It helps your designer build their reputation.</CardSubtitle>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <Star className="h-4 w-4 text-accent" />
+        <CardTitle>Rate this project</CardTitle>
+      </div>
+      <CardSubtitle className="mt-1">
+        Your project is complete — leave a 1–5 star review and a few words for your designer.
+      </CardSubtitle>
+      <div className="mt-4 flex items-center gap-1">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onMouseEnter={() => setHover(n)}
+            onMouseLeave={() => setHover(0)}
+            onClick={() => setRating(n)}
+            className="p-1"
+            aria-label={`${n} star${n > 1 ? "s" : ""}`}
+          >
+            <Star
+              className={`h-7 w-7 transition-colors ${
+                (hover || rating) >= n ? "fill-warning text-warning" : "text-muted-foreground"
+              }`}
+            />
+          </button>
+        ))}
+        {rating > 0 ? (
+          <span className="ml-2 text-sm text-muted-foreground">
+            {rating}/5 — {["", "Disappointing", "It was okay", "Good", "Great", "Outstanding"][rating]}
+          </span>
+        ) : null}
+      </div>
+      <Textarea
+        className="mt-3"
+        placeholder="What did your designer do well? Anything to improve?"
+        value={comment}
+        onChange={(e) => setComment(e.target.value)}
+      />
+      {error ? (
+        <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {error}
+        </div>
+      ) : null}
+      <div className="mt-3">
+        <Button variant="accent" onClick={submit} loading={submitting}>
+          Submit review
+        </Button>
+      </div>
+    </Card>
   );
 }

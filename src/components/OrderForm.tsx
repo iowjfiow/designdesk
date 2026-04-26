@@ -1,12 +1,14 @@
 "use client";
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardSubtitle, CardTitle } from "@/components/ui/Card";
 import { Button } from "@/components/ui/Button";
 import { Input, Textarea, Field, Label } from "@/components/ui/Input";
 import { Badge } from "@/components/ui/Badge";
 import { formatMoney } from "@/lib/money";
 import {
+  Briefcase,
+  Building2,
+  Calendar,
   Check,
   ChevronDown,
   Copy,
@@ -14,6 +16,7 @@ import {
   FileText,
   Image as ImageIcon,
   KeyRound,
+  Link2,
   Mail,
   Package,
   Palette,
@@ -24,7 +27,7 @@ import {
   Sparkles,
   Star,
   User,
-  Users,
+  Wallet,
   Zap,
 } from "lucide-react";
 
@@ -75,35 +78,25 @@ const ADDON_CATEGORIES: {
   { key: "EXTRA", label: "Extras", subtitle: "Express, extra revisions, more", icon: <Zap className="h-4 w-4" /> },
 ];
 
-type Role = "DESIGNER" | "CLIENT_MANAGER" | "ADMIN" | "CLIENT";
-
-export function ServiceBuilder({
-  defaultMode,
-  myRole,
-  myEmail,
-}: {
-  defaultMode: "SOLO" | "COLLAB";
-  myRole: Role;
-  myEmail: string;
-}) {
-  const router = useRouter();
-  const isManager = myRole === "CLIENT_MANAGER";
-  const counterpartyLabel = isManager ? "Designer email" : "Client Manager email";
-  const counterpartyPlaceholder = isManager ? "designer@example.com" : "manager@example.com";
+export function OrderForm() {
   const [packages, setPackages] = useState<Pkg[]>([]);
   const [addons, setAddons] = useState<Addon[]>([]);
-  const [mode, setMode] = useState<"SOLO" | "COLLAB">(isManager ? "COLLAB" : defaultMode);
   const [packageId, setPackageId] = useState<string | null>(null);
   const [selectedAddons, setSelectedAddons] = useState<Set<string>>(new Set());
   const [title, setTitle] = useState("");
   const [briefMd, setBriefMd] = useState("");
   const [clientEmail, setClientEmail] = useState("");
   const [clientName, setClientName] = useState("");
-  const [managerEmail, setManagerEmail] = useState("");
+  const [clientCompany, setClientCompany] = useState("");
+  const [clientPhone, setClientPhone] = useState("");
+  const [clientWebsite, setClientWebsite] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [budget, setBudget] = useState("");
+  const [references, setReferences] = useState("");
   const [taxBps] = useState(1800);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [success, setSuccess] = useState<{ projectId: string; magicLink: string | null } | null>(null);
+  const [success, setSuccess] = useState<{ projectId: string; code: string; magicLink: string | null } | null>(null);
   const [addonSearch, setAddonSearch] = useState("");
   const [openCategories, setOpenCategories] = useState<Set<AddonCategory>>(
     new Set<AddonCategory>(["FORMAT", "USAGE_RIGHTS"]),
@@ -113,107 +106,92 @@ export function ServiceBuilder({
     void Promise.all([
       fetch("/api/catalog/packages").then((r) => r.json()),
       fetch("/api/catalog/addons").then((r) => r.json()),
-    ]).then(([p, a]) => {
-      setPackages(p.packages ?? []);
-      setAddons(a.addons ?? []);
-      if (p.packages?.[0]) setPackageId(p.packages[0].id);
+    ]).then(([pk, ad]) => {
+      setPackages(pk.packages ?? []);
+      setAddons(ad.addons ?? []);
+      const popular = (pk.packages ?? []).find((p: Pkg) => p.popular);
+      if (popular) setPackageId(popular.id);
     });
   }, []);
 
-  const pkg = packages.find((p) => p.id === packageId);
-  const subtotalMinor =
-    (pkg?.priceMinor ?? 0) +
-    addons.filter((a) => selectedAddons.has(a.id)).reduce((s, a) => s + a.priceMinor, 0);
-  const taxMinor = Math.floor((subtotalMinor * taxBps) / 10_000);
-  const totalMinor = subtotalMinor + taxMinor;
+  const pkg = packages.find((p) => p.id === packageId) ?? null;
   const currency = pkg?.currency ?? "INR";
+
+  const subtotalMinor = useMemo(() => {
+    if (!pkg) return 0;
+    return pkg.priceMinor + addons.filter((a) => selectedAddons.has(a.id)).reduce((s, a) => s + a.priceMinor, 0);
+  }, [pkg, addons, selectedAddons]);
+  const taxMinor = Math.floor((subtotalMinor * taxBps) / 10000);
+  const totalMinor = subtotalMinor + taxMinor;
 
   async function submit() {
     setError(null);
-    if (!pkg) return setError("Select a package");
-    if (!title.trim()) return setError("Project title is required");
-    if (!clientEmail) return setError("Client email is required");
-    if (mode === "COLLAB" && !managerEmail) {
-      return setError(`${counterpartyLabel} is required for collaboration mode`);
-    }
-    if (mode === "COLLAB" && managerEmail.toLowerCase() === myEmail.toLowerCase()) {
-      return setError(`${counterpartyLabel} must be a different person from you`);
-    }
-    if (mode === "COLLAB" && managerEmail.toLowerCase() === clientEmail.toLowerCase()) {
-      return setError("Client and counterparty must use different emails");
-    }
+    if (!packageId) return setError("Pick a package.");
+    if (title.trim().length < 2) return setError("Project title is required.");
+    if (!clientEmail.includes("@")) return setError("A valid email is required so we can reach you.");
     setSubmitting(true);
     try {
-      const res = await fetch("/api/projects", {
+      const refs = references
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .slice(0, 20);
+      const r = await fetch("/api/public/orders", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          title,
-          briefMd,
-          mode,
-          clientEmail,
-          clientName: clientName || undefined,
-          managerEmail: mode === "COLLAB" ? managerEmail : undefined,
-          packageId: pkg.id,
+          title: title.trim(),
+          briefMd: briefMd.trim() || undefined,
+          clientEmail: clientEmail.trim(),
+          clientName: clientName.trim() || undefined,
+          clientCompany: clientCompany.trim() || undefined,
+          clientPhone: clientPhone.trim() || undefined,
+          clientWebsite: clientWebsite.trim() || undefined,
+          packageId,
           addonIds: Array.from(selectedAddons),
           taxBps,
+          deadline: deadline || undefined,
+          budgetMinor: budget ? Math.round(parseFloat(budget) * 100) : undefined,
+          references: refs,
         }),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Failed to create project");
-      setSuccess({ projectId: json.project.id, magicLink: json.magicLink ?? null });
-      router.refresh();
+      const json = await r.json();
+      if (!r.ok) throw new Error(json.error ?? "Could not place order");
+      setSuccess({ projectId: json.project.id, code: json.project.code, magicLink: json.magicLink ?? null });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed");
+      setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSubmitting(false);
     }
   }
 
   if (success) {
-    return <PostCreate projectId={success.projectId} magicLink={success.magicLink} />;
+    return <PostOrder code={success.code} magicLink={success.magicLink} />;
   }
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
       <div className="space-y-6">
         <Card>
-          <SectionHeader step="1" icon={<Users className="h-4 w-4" />} title="Mode" subtitle={isManager ? "Managers always run in collab mode." : "How will this project run?"} />
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <ModeCard
-              active={mode === "SOLO"}
-              icon={<User className="h-4 w-4" />}
-              title="Solo"
-              body="You handle the client end-to-end. 100% goes to you."
-              onClick={() => !isManager && setMode("SOLO")}
-              disabled={isManager}
-            />
-            <ModeCard
-              active={mode === "COLLAB"}
-              icon={<Users className="h-4 w-4" />}
-              title="Collaboration"
-              body="A Client Manager brings the client. Revenue auto-splits."
-              onClick={() => setMode("COLLAB")}
-            />
-          </div>
-        </Card>
-
-        <Card>
-          <SectionHeader step="2" icon={<FileText className="h-4 w-4" />} title="Project" subtitle="Title and brief." />
+          <SectionHeader step="1" icon={<FileText className="h-4 w-4" />} title="Project" subtitle="What do you need designed?" />
           <div className="mt-4 grid gap-4">
             <Field>
-              <Label>Project title</Label>
-              <Input placeholder="e.g. Acme Logo redesign" value={title} onChange={(e) => setTitle(e.target.value)} />
+              <Label>Project title *</Label>
+              <Input placeholder="e.g. Brand identity for my coffee roastery" value={title} onChange={(e) => setTitle(e.target.value)} />
             </Field>
             <Field>
-              <Label>Brief / requirements</Label>
-              <Textarea placeholder="Markdown welcome — colours, references, constraints…" value={briefMd} onChange={(e) => setBriefMd(e.target.value)} />
+              <Label>Brief (optional but encouraged)</Label>
+              <Textarea
+                placeholder="Markdown welcome — colours you love, brands you admire, what your business does, any constraints…"
+                value={briefMd}
+                onChange={(e) => setBriefMd(e.target.value)}
+              />
             </Field>
           </div>
         </Card>
 
         <Card>
-          <SectionHeader step="3" icon={<Package className="h-4 w-4" />} title="Base package" subtitle="Pick what fits — every package can be customised with add-ons below." />
+          <SectionHeader step="2" icon={<Package className="h-4 w-4" />} title="Pick a package" subtitle="Every package can be customised with add-ons below." />
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {packages.map((p) => {
               const active = packageId === p.id;
@@ -247,9 +225,8 @@ export function ServiceBuilder({
                   <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
                     {(p.highlights.length > 0 ? p.highlights : [
                       `${p.concepts} concept${p.concepts > 1 ? "s" : ""}`,
-                      `${p.revisions} revision${p.revisions !== 1 ? "s" : ""}`,
+                      `${p.revisions} revisions`,
                       `Delivery in ${p.deliveryDays} days`,
-                      `Files: ${p.includedFiles.join(", ")}`,
                     ]).map((h) => (
                       <li key={h} className="flex items-start gap-1.5">
                         <Check className="mt-0.5 h-3 w-3 flex-shrink-0 text-success" />
@@ -272,23 +249,14 @@ export function ServiceBuilder({
         </Card>
 
         <Card>
-          <SectionHeader step="4" icon={<Plus className="h-4 w-4" />} title="Add-ons" subtitle="Browse by category. Total updates live as you tick." />
+          <SectionHeader step="3" icon={<Plus className="h-4 w-4" />} title="Add-ons" subtitle="Browse by category. Total updates live." />
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <div className="relative flex-1 min-w-[200px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Search add-ons (e.g. svg, mockup, commercial)…"
-                value={addonSearch}
-                onChange={(e) => setAddonSearch(e.target.value)}
-                className="pl-8"
-              />
+              <Input placeholder="Search add-ons…" value={addonSearch} onChange={(e) => setAddonSearch(e.target.value)} className="pl-8" />
             </div>
             {selectedAddons.size > 0 ? (
-              <button
-                type="button"
-                onClick={() => setSelectedAddons(new Set())}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
+              <button type="button" onClick={() => setSelectedAddons(new Set())} className="text-xs text-muted-foreground hover:text-foreground">
                 Clear {selectedAddons.size}
               </button>
             ) : null}
@@ -336,15 +304,11 @@ export function ServiceBuilder({
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-sm font-medium">
                         {cat.label}
-                        {selectedInCat > 0 ? (
-                          <Badge variant="accent">{selectedInCat} selected</Badge>
-                        ) : null}
+                        {selectedInCat > 0 ? <Badge variant="accent">{selectedInCat} selected</Badge> : null}
                       </div>
                       <div className="text-xs text-muted-foreground">{cat.subtitle}</div>
                     </div>
-                    <ChevronDown
-                      className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
-                    />
+                    <ChevronDown className={`h-4 w-4 flex-shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
                   </button>
                   {isOpen ? (
                     <div className="grid gap-2 border-t border-border bg-card p-3 sm:grid-cols-2">
@@ -354,16 +318,10 @@ export function ServiceBuilder({
                           <label
                             key={a.id}
                             className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-all ${
-                              on
-                                ? "border-accent/40 bg-accent/5"
-                                : "border-border hover:border-border-strong hover:bg-muted/40"
+                              on ? "border-accent/40 bg-accent/5" : "border-border hover:border-border-strong hover:bg-muted/40"
                             }`}
                           >
-                            <span
-                              className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-md border ${
-                                on ? "accent-gradient border-transparent text-white" : "border-border-strong"
-                              }`}
-                            >
+                            <span className={`mt-0.5 flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-md border ${on ? "accent-gradient border-transparent text-white" : "border-border-strong"}`}>
                               {on ? <Check className="h-3 w-3" /> : null}
                             </span>
                             <input
@@ -392,36 +350,70 @@ export function ServiceBuilder({
                 </div>
               );
             })}
-            {addons.filter((a) => addonSearch.length === 0 || a.name.toLowerCase().includes(addonSearch.toLowerCase()) || a.description.toLowerCase().includes(addonSearch.toLowerCase())).length === 0 ? (
-              <p className="rounded-xl border border-border bg-muted/30 p-4 text-center text-sm text-muted-foreground">
-                No add-ons match &ldquo;{addonSearch}&rdquo;.
-              </p>
-            ) : null}
           </div>
         </Card>
 
         <Card>
-          <SectionHeader step="5" icon={<Mail className="h-4 w-4" />} title="Parties" subtitle="Client gets a magic-link — no signup." />
+          <SectionHeader step="4" icon={<User className="h-4 w-4" />} title="Your contact info" subtitle="So your designer can reach you. We never share this." />
           <div className="mt-4 grid gap-4 sm:grid-cols-2">
             <Field>
-              <Label>Client email *</Label>
-              <Input type="email" placeholder="client@brand.com" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
+              <Label>Email *</Label>
+              <Input type="email" placeholder="you@brand.com" value={clientEmail} onChange={(e) => setClientEmail(e.target.value)} />
             </Field>
             <Field>
-              <Label>Client name (optional)</Label>
+              <Label>Your name</Label>
               <Input placeholder="Carla Chen" value={clientName} onChange={(e) => setClientName(e.target.value)} />
             </Field>
-            {mode === "COLLAB" ? (
-              <Field className="sm:col-span-2">
-                <Label>{counterpartyLabel} *</Label>
-                <Input type="email" placeholder={counterpartyPlaceholder} value={managerEmail} onChange={(e) => setManagerEmail(e.target.value)} />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {isManager
-                    ? "The designer who will execute the work. They must already have a DesignDesk account."
-                    : "The client manager who brings the client. They must already have a DesignDesk account."}
-                </p>
-              </Field>
-            ) : null}
+            <Field>
+              <Label>
+                <Building2 className="mr-1 inline h-3 w-3" />
+                Company
+              </Label>
+              <Input placeholder="Acme Coffee Co." value={clientCompany} onChange={(e) => setClientCompany(e.target.value)} />
+            </Field>
+            <Field>
+              <Label>
+                <Mail className="mr-1 inline h-3 w-3" />
+                Phone
+              </Label>
+              <Input type="tel" placeholder="+91 90000 00000" value={clientPhone} onChange={(e) => setClientPhone(e.target.value)} />
+            </Field>
+            <Field className="sm:col-span-2">
+              <Label>
+                <Link2 className="mr-1 inline h-3 w-3" />
+                Website (if any)
+              </Label>
+              <Input type="url" placeholder="https://acme.coffee" value={clientWebsite} onChange={(e) => setClientWebsite(e.target.value)} />
+            </Field>
+          </div>
+        </Card>
+
+        <Card>
+          <SectionHeader step="5" icon={<Briefcase className="h-4 w-4" />} title="Scope (optional)" subtitle="Helps the designer scope timing and price accurately." />
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            <Field>
+              <Label>
+                <Calendar className="mr-1 inline h-3 w-3" />
+                Deadline (if any)
+              </Label>
+              <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+            </Field>
+            <Field>
+              <Label>
+                <Wallet className="mr-1 inline h-3 w-3" />
+                Budget you have in mind
+              </Label>
+              <Input type="number" placeholder="e.g. 15000" value={budget} onChange={(e) => setBudget(e.target.value)} />
+              <p className="mt-1 text-xs text-muted-foreground">In {currency}. Optional — helps your designer suggest the right scope.</p>
+            </Field>
+            <Field className="sm:col-span-2">
+              <Label>References (one per line)</Label>
+              <Textarea
+                placeholder={"https://example.com/inspiration\nhttps://dribbble.com/..."}
+                value={references}
+                onChange={(e) => setReferences(e.target.value)}
+              />
+            </Field>
           </div>
         </Card>
       </div>
@@ -430,15 +422,13 @@ export function ServiceBuilder({
         <Card>
           <div className="flex items-center justify-between">
             <CardTitle>Order summary</CardTitle>
-            <Badge variant={mode === "COLLAB" ? "accent" : "muted"}>{mode}</Badge>
+            <Badge variant="accent">PUBLIC</Badge>
           </div>
           <div className="mt-4 space-y-2 text-sm">
             <Row label={pkg?.name ?? "—"} value={pkg ? formatMoney(pkg.priceMinor, pkg.currency) : "—"} />
-            {addons
-              .filter((a) => selectedAddons.has(a.id))
-              .map((a) => (
-                <Row key={a.id} label={a.name} value={`+${formatMoney(a.priceMinor, a.currency)}`} />
-              ))}
+            {addons.filter((a) => selectedAddons.has(a.id)).map((a) => (
+              <Row key={a.id} label={a.name} value={`+${formatMoney(a.priceMinor, a.currency)}`} />
+            ))}
             <Divider />
             <Row label="Subtotal" value={formatMoney(subtotalMinor, currency)} />
             <Row label={`Tax (${(taxBps / 100).toFixed(0)}%)`} value={formatMoney(taxMinor, currency)} />
@@ -450,7 +440,7 @@ export function ServiceBuilder({
           </div>
           <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
             <Sparkles className="mr-1 inline h-3 w-3 text-accent" />
-            {mode === "COLLAB" ? "Designer 60% / Manager 40% (editable on project page)" : "100% goes to you — no manager party"}
+            Pricing locks once a designer reviews and you both approve.
           </div>
           {error ? (
             <div className="mt-3 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -458,10 +448,10 @@ export function ServiceBuilder({
             </div>
           ) : null}
           <Button className="mt-5 w-full" variant="accent" size="lg" onClick={submit} loading={submitting}>
-            Create project
+            Place order
           </Button>
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            Both sides approve — then pricing locks. The client gets a magic-link by email.
+            We&apos;ll email you a private link to track everything. No signup needed.
           </p>
         </Card>
       </aside>
@@ -469,91 +459,7 @@ export function ServiceBuilder({
   );
 }
 
-function ModeCard({
-  active,
-  title,
-  body,
-  icon,
-  onClick,
-  disabled,
-}: {
-  active: boolean;
-  title: string;
-  body: string;
-  icon: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`flex flex-col rounded-xl border p-4 text-left transition-all ${
-        active
-          ? "border-accent/40 bg-accent/5 shadow-[0_0_0_3px_rgba(99,102,241,0.10)]"
-          : disabled
-            ? "cursor-not-allowed border-border opacity-50"
-            : "border-border hover:border-border-strong hover:bg-muted/40"
-      }`}
-    >
-      <div className="flex items-center justify-between">
-        <span
-          className={`flex h-8 w-8 items-center justify-center rounded-md ${
-            active ? "accent-gradient text-white" : "bg-muted text-muted-foreground"
-          }`}
-        >
-          {icon}
-        </span>
-        {active ? <Check className="h-4 w-4 text-accent" /> : null}
-      </div>
-      <div className="mt-3 text-sm font-medium">{title}</div>
-      <div className="mt-1 text-xs text-muted-foreground">{body}</div>
-    </button>
-  );
-}
-
-function SectionHeader({
-  step,
-  icon,
-  title,
-  subtitle,
-}: {
-  step: string;
-  icon: React.ReactNode;
-  title: string;
-  subtitle?: string;
-}) {
-  return (
-    <div className="flex items-start gap-3">
-      <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-accent/10 text-xs font-semibold text-accent">
-        {step}
-      </div>
-      <div className="flex-1">
-        <div className="flex items-center gap-2">
-          <span className="text-muted-foreground">{icon}</span>
-          <CardTitle>{title}</CardTitle>
-        </div>
-        {subtitle ? <CardSubtitle className="mt-0.5">{subtitle}</CardSubtitle> : null}
-      </div>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-muted-foreground">{label}</span>
-      <span>{value}</span>
-    </div>
-  );
-}
-function Divider() {
-  return <div className="my-1 h-px w-full bg-border" />;
-}
-
-function PostCreate({ projectId, magicLink }: { projectId: string; magicLink: string | null }) {
-  const router = useRouter();
+function PostOrder({ code, magicLink }: { code: string; magicLink: string | null }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="mx-auto max-w-2xl">
@@ -562,19 +468,19 @@ function PostCreate({ projectId, magicLink }: { projectId: string; magicLink: st
           <span className="flex h-12 w-12 items-center justify-center rounded-full bg-success/15 text-success">
             <Check className="h-5 w-5" />
           </span>
-          <CardTitle>Project created</CardTitle>
+          <CardTitle>Order placed — {code}</CardTitle>
           <CardSubtitle className="max-w-md">
-            Both sides need to approve the scope to lock pricing and generate milestones.
+            A designer will pick this up shortly. You&apos;ll get an email with your private link too.
           </CardSubtitle>
         </div>
         {magicLink ? (
           <div className="mt-4 space-y-2 rounded-xl border border-accent/20 bg-accent/5 p-4">
             <div className="flex items-center gap-2 text-sm font-medium">
               <KeyRound className="h-4 w-4 text-accent" />
-              Client magic-link
+              Your private project link
             </div>
             <p className="text-xs text-muted-foreground">
-              Send this to your client — no signup needed. They land directly on a polished portal where they can review the quote, chat, and pay.
+              Bookmark this. It&apos;s the only thing you need to view your project, chat with your designer, approve milestones, and download deliverables.
             </p>
             <div className="flex items-start gap-2 rounded-lg border border-border bg-card p-2">
               <code className="flex-1 break-all text-xs">{magicLink}</code>
@@ -592,20 +498,52 @@ function PostCreate({ projectId, magicLink }: { projectId: string; magicLink: st
               </button>
             </div>
           </div>
-        ) : (
-          <p className="mt-4 rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-            We&apos;ve emailed the client a private link. You can re-issue it any time from the project page.
-          </p>
-        )}
+        ) : null}
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button variant="accent" onClick={() => router.push(`/dashboard/projects/${projectId}`)}>
-            Open project workspace
-          </Button>
-          <Button variant="outline" onClick={() => router.push("/dashboard/projects")}>
-            Back to projects
-          </Button>
+          {magicLink ? (
+            <a href={magicLink} className="inline-flex">
+              <Button variant="accent">Open my project</Button>
+            </a>
+          ) : null}
+          <a href="/" className="inline-flex">
+            <Button variant="outline">Back to home</Button>
+          </a>
         </div>
       </Card>
     </div>
   );
+}
+
+function SectionHeader({ step, icon, title, subtitle }: { step?: string; icon: React.ReactNode; title: string; subtitle?: string }) {
+  return (
+    <div className="flex items-start gap-3">
+      {step ? (
+        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-accent/10 text-xs font-semibold text-accent">
+          {step}
+        </span>
+      ) : (
+        <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">{icon}</span>
+      )}
+      <div>
+        <CardTitle className="flex items-center gap-1.5 text-base">
+          {step ? <span className="text-muted-foreground">{icon}</span> : null}
+          {title}
+        </CardTitle>
+        {subtitle ? <CardSubtitle className="mt-0.5">{subtitle}</CardSubtitle> : null}
+      </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between text-sm">
+      <span className="truncate text-muted-foreground">{label}</span>
+      <span className="font-medium tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function Divider() {
+  return <hr className="my-1 border-border" />;
 }

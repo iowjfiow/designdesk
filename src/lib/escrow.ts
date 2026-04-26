@@ -49,7 +49,9 @@ export async function releaseMilestone(args: {
     platformFeeShare = split.platformFee;
   }
 
-  const designer = await prisma.user.findUnique({ where: { id: project.designerId } });
+  if (!project.designerId) throw new Error("Project has no designer assigned");
+  const designerId = project.designerId;
+  const designer = await prisma.user.findUnique({ where: { id: designerId } });
   const manager = project.managerId
     ? await prisma.user.findUnique({ where: { id: project.managerId } })
     : null;
@@ -105,7 +107,7 @@ export async function releaseMilestone(args: {
     ledgerOps.push(
       prisma.walletEntry.create({
         data: {
-          userId: project.designerId,
+          userId: designerId,
           projectId: project.id,
           paymentId: payment.id,
           kind: "ESCROW_RELEASE",
@@ -137,7 +139,7 @@ export async function releaseMilestone(args: {
     ledgerOps.push(
       prisma.walletEntry.create({
         data: {
-          userId: project.designerId, // tracked against project owner for visibility
+          userId: designerId, // tracked against project owner for visibility
           projectId: project.id,
           paymentId: payment.id,
           kind: "PLATFORM_FEE",

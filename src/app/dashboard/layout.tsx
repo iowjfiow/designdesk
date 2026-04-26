@@ -10,7 +10,12 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const me = await getCurrentUser();
   if (!me) redirect("/login");
 
-  const unread = await prisma.notification.count({ where: { userId: me.id, readAt: null } });
+  const [unread, inboxCount] = await Promise.all([
+    prisma.notification.count({ where: { userId: me.id, readAt: null } }),
+    ["DESIGNER", "CLIENT_MANAGER", "ADMIN"].includes(me.role)
+      ? prisma.project.count({ where: { status: "INCOMING" } })
+      : Promise.resolve(0),
+  ]);
 
   return (
     <div className="min-h-screen bg-background">
@@ -20,7 +25,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             <span className="inline-block h-6 w-6 rounded-md accent-gradient shadow-sm" />
             DesignDesk
           </Link>
-          <DashboardNav unread={unread} />
+          <DashboardNav unread={unread} inboxCount={inboxCount} />
           <div className="mt-auto rounded-xl border border-border bg-card p-3 text-xs">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-full accent-gradient text-xs font-medium text-white">

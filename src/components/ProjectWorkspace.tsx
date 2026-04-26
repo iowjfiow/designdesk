@@ -8,18 +8,25 @@ import { Textarea } from "@/components/ui/Input";
 import { formatMoney } from "@/lib/money";
 import {
   AlertTriangle,
+  Briefcase,
+  Building2,
+  Calendar,
   Check,
   Circle,
   Clipboard,
   Copy,
+  Globe,
   KeyRound,
+  Link2,
   MessageSquare,
+  Phone,
   Send,
   Shield,
   ShieldAlert,
   Sparkles,
   Upload,
   Users,
+  Wallet,
 } from "lucide-react";
 
 type Message = {
@@ -35,18 +42,22 @@ type ProjectDetail = {
   id: string;
   code: string;
   title: string;
+  briefMd: string | null;
   mode: "SOLO" | "COLLAB";
   status: string;
-  designerId: string;
+  designerId: string | null;
   managerId: string | null;
   clientContactId: string;
+  deadline: string | null;
+  budgetMinor: number | null;
+  references: string[];
   designerBps: number;
   managerBps: number;
   designerApprovedAt: string | null;
   managerApprovedAt: string | null;
-  designer: { id: string; name: string | null; email: string; stripeAccountId: string | null; payoutsEnabled: boolean };
+  designer: { id: string; name: string | null; email: string; stripeAccountId: string | null; payoutsEnabled: boolean } | null;
   manager: { id: string; name: string | null; email: string; stripeAccountId: string | null; payoutsEnabled: boolean } | null;
-  clientContact: { id: string; name: string | null; email: string };
+  clientContact: { id: string; name: string | null; email: string; company: string | null; phone: string | null; website: string | null };
   order: {
     id: string;
     locked: boolean;
@@ -317,7 +328,11 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
             </div>
             <ul className="mt-3 space-y-2 text-sm">
               <PartyRow role="Client" name={project.clientContact.name ?? project.clientContact.email} sub={project.clientContact.email} accent="client" />
-              <PartyRow role="Designer" name={project.designer.name ?? project.designer.email} sub={project.designer.email} accent="designer" />
+              {project.designer ? (
+                <PartyRow role="Designer" name={project.designer.name ?? project.designer.email} sub={project.designer.email} accent="designer" />
+              ) : (
+                <PartyRow role="Designer" name="unclaimed" sub="—" accent="designer" />
+              )}
               {project.manager ? (
                 <PartyRow role="Manager" name={project.manager.name ?? project.manager.email} sub={project.manager.email} accent="manager" />
               ) : null}
@@ -329,6 +344,8 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
               </div>
             ) : null}
           </Card>
+
+          <ProjectInfoCard project={project} />
 
           <Card>
             <div className="flex items-center gap-2">
@@ -716,4 +733,92 @@ function Row({ label, value }: { label: React.ReactNode; value: React.ReactNode 
 
 function Divider() {
   return <hr className="my-2 border-border" />;
+}
+
+function ProjectInfoCard({ project }: { project: ProjectDetail }) {
+  const c = project.clientContact;
+  const hasContact = c.company || c.phone || c.website;
+  const hasScope = project.deadline || project.budgetMinor || project.references.length > 0;
+  const hasBrief = project.briefMd && project.briefMd.trim().length > 0;
+  if (!hasContact && !hasScope && !hasBrief) return null;
+  const currency = project.order?.currency ?? "INR";
+  return (
+    <Card>
+      <div className="flex items-center gap-2">
+        <Briefcase className="h-4 w-4 text-accent" />
+        <CardTitle>Project info</CardTitle>
+      </div>
+      <CardSubtitle className="mt-1">Everything the client shared.</CardSubtitle>
+      <div className="mt-3 space-y-3 text-sm">
+        {hasBrief ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Brief</div>
+            <p className="mt-1 whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+              {project.briefMd}
+            </p>
+          </div>
+        ) : null}
+        {hasContact ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Contact</div>
+            <ul className="mt-1 space-y-1">
+              {c.company ? <InfoRow icon={<Building2 className="h-3 w-3" />} value={c.company} /> : null}
+              {c.phone ? <InfoRow icon={<Phone className="h-3 w-3" />} value={c.phone} /> : null}
+              {c.website ? (
+                <InfoRow
+                  icon={<Globe className="h-3 w-3" />}
+                  value={
+                    <a className="text-accent hover:underline" href={c.website} target="_blank" rel="noreferrer">
+                      {c.website}
+                    </a>
+                  }
+                />
+              ) : null}
+            </ul>
+          </div>
+        ) : null}
+        {hasScope ? (
+          <div>
+            <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Scope</div>
+            <ul className="mt-1 space-y-1">
+              {project.deadline ? (
+                <InfoRow icon={<Calendar className="h-3 w-3" />} value={`Deadline ${new Date(project.deadline).toLocaleDateString()}`} />
+              ) : null}
+              {project.budgetMinor ? (
+                <InfoRow icon={<Wallet className="h-3 w-3" />} value={`Budget ${formatMoney(project.budgetMinor, currency)}`} />
+              ) : null}
+              {project.references.length > 0 ? (
+                <li className="space-y-0.5">
+                  {project.references.map((r) => (
+                    <InfoRow
+                      key={r}
+                      icon={<Link2 className="h-3 w-3" />}
+                      value={
+                        r.startsWith("http") ? (
+                          <a className="break-all text-accent hover:underline" href={r} target="_blank" rel="noreferrer">
+                            {r}
+                          </a>
+                        ) : (
+                          <span className="break-all">{r}</span>
+                        )
+                      }
+                    />
+                  ))}
+                </li>
+              ) : null}
+            </ul>
+          </div>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function InfoRow({ icon, value }: { icon: React.ReactNode; value: React.ReactNode }) {
+  return (
+    <li className="flex items-start gap-2 text-xs text-muted-foreground">
+      <span className="mt-0.5 flex-shrink-0">{icon}</span>
+      <span className="min-w-0 flex-1 text-foreground">{value}</span>
+    </li>
+  );
 }

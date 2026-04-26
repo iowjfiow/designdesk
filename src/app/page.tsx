@@ -24,6 +24,11 @@ export default function Home() {
             DesignDesk
           </Link>
           <div className="flex items-center gap-2">
+            <Link href="/order">
+              <Button variant="ghost" size="sm">
+                Place an order
+              </Button>
+            </Link>
             <Link href="/login">
               <Button variant="ghost" size="sm">
                 Log in
@@ -52,14 +57,14 @@ export default function Home() {
               whether you run solo or with a partner who brings clients.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/signup">
+              <Link href="/order">
                 <Button size="lg" variant="accent">
-                  Create an account <ArrowRight className="h-4 w-4" />
+                  Place an order <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
-              <Link href="/login">
+              <Link href="/signup">
                 <Button size="lg" variant="outline">
-                  I have an account
+                  I&apos;m a designer
                 </Button>
               </Link>
             </div>

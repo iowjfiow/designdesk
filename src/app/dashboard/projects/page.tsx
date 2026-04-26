@@ -67,7 +67,7 @@ export default async function ProjectsPage() {
                 <div className="mt-1 truncate text-xs text-muted-foreground">
                   {p.code}
                   {" · "}client {p.clientContact?.email ?? "—"}
-                  {" · "}designer {p.designer.name ?? p.designer.email}
+                  {" · "}designer {p.designer ? (p.designer.name ?? p.designer.email) : "unclaimed"}
                   {p.manager ? <> · manager {p.manager.name ?? p.manager.email}</> : null}
                 </div>
               </div>

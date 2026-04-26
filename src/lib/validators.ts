@@ -48,3 +48,31 @@ export const SubmitMilestoneSchema = z.object({
 export const RejectMilestoneSchema = z.object({
   reason: z.string().min(3).max(2000),
 });
+
+export const PublicOrderSchema = z.object({
+  title: z.string().min(2).max(200),
+  briefMd: z.string().max(20_000).optional(),
+  clientEmail: z.string().email(),
+  clientName: z.string().min(1).max(120).optional(),
+  clientCompany: z.string().max(200).optional(),
+  clientPhone: z.string().max(60).optional(),
+  clientWebsite: z.string().max(500).optional(),
+  packageId: z.string().min(1),
+  addonIds: z.array(z.string()).default([]),
+  taxBps: z.number().int().min(0).max(10_000).default(1800),
+  deadline: z.string().optional(),
+  budgetMinor: z.number().int().min(0).max(1_000_000_000).optional(),
+  references: z.array(z.string().max(500)).max(20).default([]),
+});
+
+export const ReviewSchema = z.object({
+  kind: z.enum(["MILESTONE", "FINAL"]),
+  milestoneId: z.string().optional(),
+  rating: z.number().int().min(1).max(5).optional(),
+  comment: z.string().min(1).max(4000),
+});
+
+export const ClaimProjectSchema = z.object({
+  managerEmail: z.string().email().optional(), // when designer claims and wants to assign manager
+  designerEmail: z.string().email().optional(), // when manager claims and wants to assign designer
+});
