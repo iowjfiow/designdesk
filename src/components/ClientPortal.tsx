@@ -283,15 +283,30 @@ export function ClientPortal({ project }: { project: Project }) {
             </Card>
 
             <Card>
-              <CardTitle>Need help?</CardTitle>
+              <div className="flex items-center gap-2">
+                <ShieldAlert className="h-4 w-4 text-warning" />
+                <CardTitle>Raise a dispute</CardTitle>
+              </div>
               {project.disputes.length === 0 && project.status !== "COMPLETED" ? (
-                <DisputeForm projectId={project.id} onRaised={() => router.refresh()} />
+                <>
+                  <CardSubtitle className="mt-1">
+                    Something off? Tell us what&apos;s wrong. Escrow freezes immediately and an admin will mediate.
+                  </CardSubtitle>
+                  <DisputeForm projectId={project.id} onRaised={() => router.refresh()} />
+                </>
               ) : project.disputes.length > 0 ? (
-                <CardSubtitle className="mt-2">
-                  A dispute is open — escrow is frozen.
-                </CardSubtitle>
+                <div className="mt-2 space-y-2">
+                  <div className="rounded-lg border border-danger/30 bg-danger/5 p-3 text-xs text-danger">
+                    <div className="flex items-center gap-1.5 font-medium">
+                      <AlertTriangle className="h-3.5 w-3.5" /> Dispute open — escrow frozen
+                    </div>
+                    {project.disputes[0]?.reason ? (
+                      <p className="mt-1 text-foreground/80">&ldquo;{project.disputes[0].reason}&rdquo;</p>
+                    ) : null}
+                  </div>
+                </div>
               ) : (
-                <CardSubtitle className="mt-2">Project completed.</CardSubtitle>
+                <CardSubtitle className="mt-2">Project completed — disputes can&apos;t be raised.</CardSubtitle>
               )}
             </Card>
 
@@ -583,17 +598,34 @@ function ChatPanel({ projectId, initial }: { projectId: string; initial: Message
 function DisputeForm({ projectId, onRaised }: { projectId: string; onRaised: () => void }) {
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const tooShort = reason.trim().length < 10;
   return (
     <div className="mt-3 space-y-2">
-      <CardSubtitle>Raise an issue if something is wrong. Escrow freezes immediately.</CardSubtitle>
-      <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the issue (min 10 chars)" />
+      <Textarea
+        rows={3}
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+          if (err) setErr(null);
+        }}
+        placeholder="Describe the issue — what's wrong, what you expected, any timeline."
+      />
+      <div className="flex items-center justify-between text-xs text-muted-foreground">
+        <span className={tooShort ? "" : "text-success"}>
+          {reason.trim().length}/10 characters minimum
+        </span>
+      </div>
+      {err ? <p className="text-xs text-danger">{err}</p> : null}
       <Button
         size="sm"
         variant="danger"
         className="w-full"
         loading={busy}
+        disabled={tooShort}
         onClick={async () => {
           setBusy(true);
+          setErr(null);
           const r = await fetch(`/api/projects/${projectId}/dispute`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -602,11 +634,14 @@ function DisputeForm({ projectId, onRaised }: { projectId: string; onRaised: () 
           setBusy(false);
           if (!r.ok) {
             const j = await r.json().catch(() => ({}));
-            alert(j.error ?? "Failed");
-          } else onRaised();
+            setErr(j.error ?? "Failed to raise dispute");
+            return;
+          }
+          onRaised();
         }}
       >
-        Raise dispute
+        <AlertTriangle className="h-3.5 w-3.5" />
+        Raise dispute & freeze escrow
       </Button>
     </div>
   );

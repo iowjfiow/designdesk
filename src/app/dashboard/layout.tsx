@@ -3,7 +3,7 @@ import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { SignOutButton } from "@/components/SignOutButton";
 import { DashboardNav } from "@/components/DashboardNav";
-import { Bell } from "lucide-react";
+import { Bell, Sparkles } from "lucide-react";
 import { prisma } from "@/lib/db";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -19,21 +19,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="grid min-h-screen lg:grid-cols-[260px_1fr]">
-        <aside className="hidden border-r border-border bg-card/40 p-4 lg:flex lg:flex-col">
-          <Link href="/dashboard" className="mb-8 flex items-center gap-2 px-2 text-base font-semibold tracking-tight">
-            <span className="inline-block h-6 w-6 rounded-md accent-gradient shadow-sm" />
+      <div className="grid min-h-screen lg:grid-cols-[264px_1fr]">
+        <aside className="hidden border-r border-border bg-card/30 p-4 lg:flex lg:flex-col">
+          <Link href="/dashboard" className="mb-8 flex items-center gap-2.5 px-2 text-base font-semibold tracking-tight">
+            <span className="flex h-7 w-7 items-center justify-center rounded-lg accent-gradient text-white shadow-sm">
+              <Sparkles className="h-3.5 w-3.5" />
+            </span>
             DesignDesk
           </Link>
           <DashboardNav unread={unread} inboxCount={inboxCount} />
-          <div className="mt-auto rounded-xl border border-border bg-card p-3 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-full accent-gradient text-xs font-medium text-white">
+          <div className="mt-auto rounded-xl border border-border bg-card p-3 text-xs shadow-sm">
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full accent-gradient text-sm font-semibold text-white shadow-sm">
                 {(me.name ?? me.email).slice(0, 1).toUpperCase()}
               </span>
               <div className="flex-1 truncate">
                 <div className="truncate font-medium">{me.name ?? me.email}</div>
-                <div className="text-muted-foreground">{me.role}</div>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{me.role.replace("_", " ").toLowerCase()}</div>
               </div>
             </div>
             <SignOutButton />

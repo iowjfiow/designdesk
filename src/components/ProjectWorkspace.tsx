@@ -88,7 +88,8 @@ type ProjectDetail = {
   activityLogs: { id: string; action: string; createdAt: string; actor: { id: string; name: string | null; role: string } | null; metadata: unknown }[];
 };
 
-export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; meId: string }) {
+export function ProjectWorkspace({ project, meId, meRole }: { project: ProjectDetail; meId: string; meRole: string }) {
+  const isAdmin = meRole === "ADMIN";
   const router = useRouter();
   const isDesigner = project.designerId === meId;
   const isManager = project.managerId === meId;
@@ -352,7 +353,9 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
               <KeyRound className="h-4 w-4 text-accent" />
               <CardTitle>Client magic-link</CardTitle>
             </div>
-            <CardSubtitle className="mt-1">No signup. The client lands straight on the project.</CardSubtitle>
+            <CardSubtitle className="mt-1">
+              Generated once when the order is placed and emailed automatically. Valid until the project is completed.
+            </CardSubtitle>
             <div className="mt-3 space-y-2 text-sm">
               {magicLink ? (
                 <div className="flex items-start gap-2 rounded-lg border border-accent/20 bg-accent/5 p-2">
@@ -368,20 +371,32 @@ export function ProjectWorkspace({ project, meId }: { project: ProjectDetail; me
                 </div>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  We emailed the link to <strong>{project.clientContact.email}</strong>. The dev server prints it to stdout too.
+                  Sent to <strong>{project.clientContact.email}</strong>. Designers and managers can&apos;t change or reissue the link — ask an admin in genuine emergencies (lost email, leaked link).
                 </p>
               )}
-              <Button size="sm" variant="outline" className="w-full" loading={busy === "magic"} onClick={reissueMagicLink}>
-                <Clipboard className="h-3.5 w-3.5" />
-                {magicLink ? "Issue another link" : "Re-issue magic link"}
-              </Button>
+              {isAdmin && (
+                <Button size="sm" variant="outline" className="w-full" loading={busy === "magic"} onClick={reissueMagicLink}>
+                  <Clipboard className="h-3.5 w-3.5" />
+                  Emergency reissue (admin)
+                </Button>
+              )}
             </div>
           </Card>
 
           <Card>
-            <CardTitle>Dispute</CardTitle>
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-warning" />
+              <CardTitle>Dispute</CardTitle>
+            </div>
             {project.disputes.length > 0 ? (
-              <CardSubtitle>An active dispute is in progress.</CardSubtitle>
+              <div className="mt-2 rounded-lg border border-danger/30 bg-danger/5 p-3 text-xs text-danger">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <AlertTriangle className="h-3.5 w-3.5" /> Dispute open — escrow frozen
+                </div>
+                {project.disputes[0]?.reason ? (
+                  <p className="mt-1 text-foreground/80">&ldquo;{project.disputes[0].reason}&rdquo;</p>
+                ) : null}
+              </div>
             ) : project.status === "COMPLETED" ? (
               <CardSubtitle>Project completed — no disputes can be raised.</CardSubtitle>
             ) : (
@@ -695,15 +710,33 @@ function DisputeForm({ projectId }: { projectId: string }) {
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const tooShort = reason.trim().length < 10;
   return (
     <div className="mt-3 space-y-2">
-      <Textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Describe the issue (min 10 chars)" />
+      <CardSubtitle>Tell us what&apos;s wrong. Escrow will freeze immediately and an admin will mediate.</CardSubtitle>
+      <Textarea
+        rows={3}
+        value={reason}
+        onChange={(e) => {
+          setReason(e.target.value);
+          if (err) setErr(null);
+        }}
+        placeholder="Describe the issue — what's wrong, what you expected, any timeline."
+      />
+      <div className="text-xs text-muted-foreground">
+        <span className={tooShort ? "" : "text-success"}>{reason.trim().length}/10 minimum</span>
+      </div>
+      {err ? <p className="text-xs text-danger">{err}</p> : null}
       <Button
         size="sm"
         variant="danger"
+        className="w-full"
         loading={busy}
+        disabled={tooShort}
         onClick={async () => {
           setBusy(true);
+          setErr(null);
           const r = await fetch(`/api/projects/${projectId}/dispute`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -712,11 +745,14 @@ function DisputeForm({ projectId }: { projectId: string }) {
           setBusy(false);
           if (!r.ok) {
             const j = await r.json().catch(() => ({}));
-            alert(j.error ?? "Failed");
-          } else router.refresh();
+            setErr(j.error ?? "Failed to raise dispute");
+            return;
+          }
+          router.refresh();
         }}
       >
-        Raise dispute
+        <AlertTriangle className="h-3.5 w-3.5" />
+        Raise dispute & freeze escrow
       </Button>
     </div>
   );
